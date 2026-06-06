@@ -11,6 +11,7 @@ app:
 auth:
   access_secret: change-me-access-secret
   refresh_secret: change-me-refresh-secret
+  password_secret: change-me-password-secret
   access_ttl: 15m
   refresh_ttl: 720h
   access_cookie_name: mini_store_access_token

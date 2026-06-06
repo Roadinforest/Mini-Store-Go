@@ -32,6 +32,7 @@ type AppConfig struct {
 type AuthConfig struct {
 	AccessSecret          string        `mapstructure:"access_secret"`
 	RefreshSecret         string        `mapstructure:"refresh_secret"`
+	PasswordSecret        string        `mapstructure:"password_secret"`
 	AccessTTL             time.Duration `mapstructure:"access_ttl"`
 	RefreshTTL            time.Duration `mapstructure:"refresh_ttl"`
 	AccessCookieName      string        `mapstructure:"access_cookie_name"`
@@ -113,6 +114,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("auth.access_secret", "change-me-access-secret")
 	v.SetDefault("auth.refresh_secret", "change-me-refresh-secret")
+	v.SetDefault("auth.password_secret", "change-me-password-secret")
 	v.SetDefault("auth.access_ttl", "15m")
 	v.SetDefault("auth.refresh_ttl", "720h")
 	v.SetDefault("auth.access_cookie_name", "mini_store_access_token")
