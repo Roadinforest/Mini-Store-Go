@@ -2,3 +2,4 @@
 .env.local
 tmp
 bin
+configs/config.yaml
