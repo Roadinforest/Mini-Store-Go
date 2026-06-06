@@ -10,6 +10,7 @@ app:
 
 database:
   dsn: postgres://postgres:postgres@localhost:5432/mini_store?sslmode=disable
+  auto_migrate: false
   max_idle_conns: 10
   max_open_conns: 50
   conn_max_lifetime: 30m

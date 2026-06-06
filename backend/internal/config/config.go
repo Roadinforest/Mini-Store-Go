@@ -30,6 +30,7 @@ type AppConfig struct {
 
 type DatabaseConfig struct {
 	DSN             string        `mapstructure:"dsn"`
+	AutoMigrate     bool          `mapstructure:"auto_migrate"`
 	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
 	MaxOpenConns    int           `mapstructure:"max_open_conns"`
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
@@ -98,6 +99,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.max_idle_conns", 10)
 	v.SetDefault("database.max_open_conns", 50)
 	v.SetDefault("database.conn_max_lifetime", "30m")
+	v.SetDefault("database.auto_migrate", false)
 
 	v.SetDefault("redis.addr", "")
 	v.SetDefault("redis.db", 0)
