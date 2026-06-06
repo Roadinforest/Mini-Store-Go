@@ -96,6 +96,12 @@ func initDatabase(cfg *config.Config, log *zap.Logger) (*gorm.DB, error) {
 		log.Warn("database disabled: empty dsn")
 		return nil, nil
 	}
+	if cfg.Database.AutoMigrate {
+		if err := database.AutoMigrate(db); err != nil {
+			return nil, err
+		}
+		log.Info("database auto migrate completed")
+	}
 	log.Info("database ready")
 	return db, nil
 }
