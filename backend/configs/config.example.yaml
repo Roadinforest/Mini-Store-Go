@@ -1,0 +1,49 @@
+app:
+  name: mini-store-go-api
+  env: development
+  host: 0.0.0.0
+  port: 8080
+  read_timeout: 10s
+  write_timeout: 10s
+  idle_timeout: 60s
+  shutdown_timeout: 10s
+
+database:
+  dsn: postgres://postgres:postgres@localhost:5432/mini_store?sslmode=disable
+  max_idle_conns: 10
+  max_open_conns: 50
+  conn_max_lifetime: 30m
+
+redis:
+  addr: localhost:6379
+  password: ""
+  db: 0
+  pool_size: 10
+
+log:
+  level: debug
+  encoding: console
+  development: true
+
+cors:
+  allowed_origins:
+    - http://localhost:5173
+    - http://localhost:3000
+  allowed_methods:
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    - OPTIONS
+  allowed_headers:
+    - Origin
+    - Content-Type
+    - Accept
+    - Authorization
+    - X-Requested-With
+    - X-Request-Id
+  exposed_headers:
+    - X-Request-Id
+  allow_credentials: true
+  max_age: 12h
