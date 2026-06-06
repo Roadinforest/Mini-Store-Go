@@ -18,15 +18,15 @@ type Product struct {
 	Stock       int             `gorm:"column:stock;not null"`
 	Price       decimal.Decimal `gorm:"column:price;type:numeric(12,2);not null;default:0"`
 	Rating      decimal.Decimal `gorm:"column:rating;type:numeric(3,2);not null;default:0"`
-	NumReviews  int             `gorm:"column:num_reviews;not null;default:0"`
-	IsFeatured  bool            `gorm:"column:is_featured;not null;default:false"`
+	NumReviews  int             `gorm:"column:numReviews;not null;default:0"`
+	IsFeatured  bool            `gorm:"column:isFeatured;not null;default:false"`
 	Banner      *string         `gorm:"column:banner;type:text"`
-	CreatedAt   time.Time       `gorm:"column:created_at;autoCreateTime"`
+	CreatedAt   time.Time       `gorm:"column:createdAt;autoCreateTime"`
 
 	OrderItems []OrderItem `gorm:"foreignKey:ProductID;references:ID"`
 	Reviews    []Review    `gorm:"foreignKey:ProductID;references:ID"`
 }
 
 func (Product) TableName() string {
-	return "products"
+	return "Product"
 }
