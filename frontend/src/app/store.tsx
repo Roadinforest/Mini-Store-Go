@@ -4,9 +4,10 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type PropsWithChildren,
 } from "react";
-import { createInitialState } from "@/mock/data";
+import * as authApi from "@/lib/api";
 import type {
   AppState,
   Order,
@@ -16,11 +17,8 @@ import type {
   ShippingAddress,
   User,
 } from "@/lib/types";
-import {
-  calcCart,
-  getAverageRatingForProduct,
-  slugify,
-} from "@/lib/utils";
+import { calcCart, getAverageRatingForProduct, slugify } from "@/lib/utils";
+import { createInitialState } from "@/mock/data";
 
 const STORAGE_KEY = "mini-store-go-mock-state";
 
@@ -28,18 +26,20 @@ type AuthPayload = { email: string; password: string };
 type SignUpPayload = { name: string; email: string; password: string };
 type ProfilePayload = { name: string; email: string };
 type ReviewPayload = { rating: number; title: string; description: string };
+type Result = { success: boolean; message: string };
 
 type StoreContextValue = {
   state: AppState;
   currentUser: User | null;
-  signIn: (payload: AuthPayload) => { success: boolean; message: string };
-  signUp: (payload: SignUpPayload) => { success: boolean; message: string };
-  signOut: () => void;
-  addToCart: (productId: string) => { success: boolean; message: string };
+  authReady: boolean;
+  signIn: (payload: AuthPayload) => Promise<Result>;
+  signUp: (payload: SignUpPayload) => Promise<Result>;
+  signOut: () => Promise<void>;
+  addToCart: (productId: string) => Result;
   removeFromCart: (productId: string) => void;
   setShippingAddress: (address: ShippingAddress) => void;
   setPaymentMethod: (method: string) => void;
-  updateProfile: (payload: ProfilePayload) => { success: boolean; message: string };
+  updateProfile: (payload: ProfilePayload) => Result;
   placeOrder: () => { success: boolean; message: string; orderId?: string };
   markOrderPaid: (orderId: string) => { success: boolean; message: string };
   markOrderDelivered: (orderId: string) => void;
@@ -47,7 +47,7 @@ type StoreContextValue = {
   deleteProduct: (productId: string) => void;
   updateUser: (userId: string, payload: Pick<User, "name" | "role">) => void;
   deleteUser: (userId: string) => void;
-  upsertReview: (productId: string, payload: ReviewPayload) => { success: boolean; message: string };
+  upsertReview: (productId: string, payload: ReviewPayload) => Result;
 };
 
 type Action =
@@ -97,15 +97,36 @@ function loadInitialState() {
 const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: PropsWithChildren) {
-  const [state, dispatch] = useReducer(reducer, createInitialState());
-
-  useEffect(() => {
-    dispatch({ type: "SET_STATE", payload: loadInitialState() });
-  }, []);
+  const [state, dispatch] = useReducer(reducer, undefined, loadInitialState);
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function bootstrapAuth() {
+      const result = await authApi.getCurrentUser();
+      if (cancelled) return;
+
+      if (result.success && result.data) {
+        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
+        dispatch({ type: "SIGN_IN", payload: result.data.id });
+      } else {
+        dispatch({ type: "SIGN_OUT" });
+      }
+
+      setAuthReady(true);
+    }
+
+    void bootstrapAuth();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const currentUser = useMemo(
     () => state.users.find((user) => user.id === state.currentUserId) ?? null,
@@ -116,43 +137,32 @@ export function StoreProvider({ children }: PropsWithChildren) {
     return {
       state,
       currentUser,
-      signIn(payload) {
-        const user = state.users.find(
-          (candidate) =>
-            candidate.email.toLowerCase() === payload.email.toLowerCase() &&
-            candidate.password === payload.password,
-        );
-
-        if (!user) {
-          return { success: false, message: "Invalid email or password." };
+      authReady,
+      async signIn(payload) {
+        const result = await authApi.signIn(payload);
+        if (!result.success || !result.data) {
+          return { success: false, message: result.message };
         }
 
-        dispatch({ type: "SIGN_IN", payload: user.id });
+        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
+        dispatch({ type: "SIGN_IN", payload: result.data.id });
         return { success: true, message: "Signed in." };
       },
-      signUp(payload) {
-        const exists = state.users.some(
-          (user) => user.email.toLowerCase() === payload.email.toLowerCase(),
-        );
-
-        if (exists) {
-          return { success: false, message: "Email already exists." };
+      async signUp(payload) {
+        const result = await authApi.signUp({
+          ...payload,
+          confirm_password: payload.password,
+        });
+        if (!result.success || !result.data) {
+          return { success: false, message: result.message };
         }
 
-        const nextUser: User = {
-          id: crypto.randomUUID(),
-          name: payload.name,
-          email: payload.email,
-          password: payload.password,
-          role: "user",
-          createdAt: new Date().toISOString(),
-        };
-
-        dispatch({ type: "SET_USERS", payload: [...state.users, nextUser] });
-        dispatch({ type: "SIGN_IN", payload: nextUser.id });
+        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
+        dispatch({ type: "SIGN_IN", payload: result.data.id });
         return { success: true, message: "Account created." };
       },
-      signOut() {
+      async signOut() {
+        await authApi.signOut();
         dispatch({ type: "SIGN_OUT" });
       },
       addToCart(productId) {
@@ -383,7 +393,7 @@ export function StoreProvider({ children }: PropsWithChildren) {
         return { success: true, message: "Review saved." };
       },
     };
-  }, [currentUser, state]);
+  }, [authReady, currentUser, state]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
@@ -394,4 +404,12 @@ export function useStore() {
     throw new Error("useStore must be used within StoreProvider");
   }
   return context;
+}
+
+function upsertUser(users: User[], nextUser: User) {
+  const exists = users.some((user) => user.id === nextUser.id);
+  if (!exists) {
+    return [...users, nextUser];
+  }
+  return users.map((user) => (user.id === nextUser.id ? { ...user, ...nextUser } : user));
 }

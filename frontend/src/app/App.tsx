@@ -22,7 +22,10 @@ import { UserProfilePage } from "@/pages/user/UserProfilePage";
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const location = useLocation();
-  const { currentUser } = useStore();
+  const { authReady, currentUser } = useStore();
+  if (!authReady) {
+    return <div className="wrapper py-10 text-sm text-muted-foreground">Checking session...</div>;
+  }
   if (!currentUser) {
     return <Navigate to="/sign-in" replace state={{ from: location.pathname }} />;
   }
@@ -30,7 +33,10 @@ function RequireAuth({ children }: { children: ReactElement }) {
 }
 
 function RequireAdmin({ children }: { children: ReactElement }) {
-  const { currentUser } = useStore();
+  const { authReady, currentUser } = useStore();
+  if (!authReady) {
+    return <div className="wrapper py-10 text-sm text-muted-foreground">Checking session...</div>;
+  }
   if (!currentUser) return <Navigate to="/sign-in" replace state={{ from: "/admin/overview" }} />;
   if (currentUser.role !== "admin") return <Navigate to="/" replace />;
   return children;

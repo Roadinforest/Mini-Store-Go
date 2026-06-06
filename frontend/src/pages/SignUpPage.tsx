@@ -8,13 +8,21 @@ export function SignUpPage() {
   const { signUp } = useStore();
   const [message, setMessage] = useState("");
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    const result = signUp({
+    const password = String(formData.get("password"));
+    const confirmPassword = String(formData.get("confirmPassword"));
+
+    if (password !== confirmPassword) {
+      setMessage("Passwords do not match.");
+      return;
+    }
+
+    const result = await signUp({
       name: String(formData.get("name")),
       email: String(formData.get("email")),
-      password: String(formData.get("password")),
+      password,
     });
     setMessage(result.message);
     if (result.success) navigate("/");
@@ -27,6 +35,7 @@ export function SignUpPage() {
         <input name="name" placeholder="Name" className="rounded-md border px-3 py-2" required />
         <input name="email" placeholder="Email" className="rounded-md border px-3 py-2" required />
         <input name="password" type="password" placeholder="Password" className="rounded-md border px-3 py-2" required />
+        <input name="confirmPassword" type="password" placeholder="Confirm password" className="rounded-md border px-3 py-2" required />
         <Button type="submit">Sign up</Button>
       </form>
       {message && <div className="mt-4 text-sm text-muted-foreground">{message}</div>}
