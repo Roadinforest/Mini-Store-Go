@@ -8,6 +8,19 @@ app:
   idle_timeout: 60s
   shutdown_timeout: 10s
 
+auth:
+  access_secret: change-me-access-secret
+  refresh_secret: change-me-refresh-secret
+  access_ttl: 15m
+  refresh_ttl: 720h
+  access_cookie_name: mini_store_access_token
+  refresh_cookie_name: mini_store_refresh_token
+  session_cart_cookie_name: session_cart_id
+  cookie_domain: ""
+  cookie_secure: false
+  cookie_http_only: true
+  cookie_same_site: lax
+
 database:
   dsn: postgres://postgres:postgres@localhost:5432/mini_store?sslmode=disable
   auto_migrate: false

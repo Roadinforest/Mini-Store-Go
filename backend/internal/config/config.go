@@ -11,6 +11,7 @@ import (
 
 type Config struct {
 	App      AppConfig      `mapstructure:"app"`
+	Auth     AuthConfig     `mapstructure:"auth"`
 	Database DatabaseConfig `mapstructure:"database"`
 	Redis    RedisConfig    `mapstructure:"redis"`
 	Log      LogConfig      `mapstructure:"log"`
@@ -26,6 +27,20 @@ type AppConfig struct {
 	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
 	IdleTimeout     time.Duration `mapstructure:"idle_timeout"`
 	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
+}
+
+type AuthConfig struct {
+	AccessSecret          string        `mapstructure:"access_secret"`
+	RefreshSecret         string        `mapstructure:"refresh_secret"`
+	AccessTTL             time.Duration `mapstructure:"access_ttl"`
+	RefreshTTL            time.Duration `mapstructure:"refresh_ttl"`
+	AccessCookieName      string        `mapstructure:"access_cookie_name"`
+	RefreshCookieName     string        `mapstructure:"refresh_cookie_name"`
+	SessionCartCookieName string        `mapstructure:"session_cart_cookie_name"`
+	CookieDomain          string        `mapstructure:"cookie_domain"`
+	CookieSecure          bool          `mapstructure:"cookie_secure"`
+	CookieHTTPOnly        bool          `mapstructure:"cookie_http_only"`
+	CookieSameSite        string        `mapstructure:"cookie_same_site"`
 }
 
 type DatabaseConfig struct {
@@ -95,6 +110,18 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("app.write_timeout", "10s")
 	v.SetDefault("app.idle_timeout", "60s")
 	v.SetDefault("app.shutdown_timeout", "10s")
+
+	v.SetDefault("auth.access_secret", "change-me-access-secret")
+	v.SetDefault("auth.refresh_secret", "change-me-refresh-secret")
+	v.SetDefault("auth.access_ttl", "15m")
+	v.SetDefault("auth.refresh_ttl", "720h")
+	v.SetDefault("auth.access_cookie_name", "mini_store_access_token")
+	v.SetDefault("auth.refresh_cookie_name", "mini_store_refresh_token")
+	v.SetDefault("auth.session_cart_cookie_name", "session_cart_id")
+	v.SetDefault("auth.cookie_domain", "")
+	v.SetDefault("auth.cookie_secure", false)
+	v.SetDefault("auth.cookie_http_only", true)
+	v.SetDefault("auth.cookie_same_site", "lax")
 
 	v.SetDefault("database.max_idle_conns", 10)
 	v.SetDefault("database.max_open_conns", 50)
