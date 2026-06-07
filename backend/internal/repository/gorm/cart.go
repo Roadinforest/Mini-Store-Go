@@ -27,7 +27,7 @@ func (r *cartRepository) GetByID(ctx context.Context, id string) (*model.Cart, e
 
 func (r *cartRepository) GetByUserID(ctx context.Context, userID string) (*model.Cart, error) {
 	var cart model.Cart
-	if err := r.db.WithContext(ctx).First(&cart, "user_id = ?", userID).Error; err != nil {
+	if err := r.db.WithContext(ctx).First(&cart, `"userId" = ?`, userID).Error; err != nil {
 		return nil, err
 	}
 	return &cart, nil
@@ -35,7 +35,7 @@ func (r *cartRepository) GetByUserID(ctx context.Context, userID string) (*model
 
 func (r *cartRepository) GetBySessionCartID(ctx context.Context, sessionCartID string) (*model.Cart, error) {
 	var cart model.Cart
-	if err := r.db.WithContext(ctx).First(&cart, "session_cart_id = ?", sessionCartID).Error; err != nil {
+	if err := r.db.WithContext(ctx).First(&cart, `"sessionCartId" = ?`, sessionCartID).Error; err != nil {
 		return nil, err
 	}
 	return &cart, nil

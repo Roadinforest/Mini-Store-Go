@@ -12,6 +12,8 @@ import (
 	"mini-store-go/backend/internal/http/middleware"
 	gormrepo "mini-store-go/backend/internal/repository/gorm"
 	authservice "mini-store-go/backend/internal/service/auth"
+	cartservice "mini-store-go/backend/internal/service/cart"
+	orderservice "mini-store-go/backend/internal/service/order"
 	productservice "mini-store-go/backend/internal/service/product"
 	reviewservice "mini-store-go/backend/internal/service/review"
 	userservice "mini-store-go/backend/internal/service/user"
@@ -53,6 +55,14 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 		validator,
 		reviewservice.NewService(db, store.Reviews, store.Products),
 	)
+	cartHandler := handler.NewCartHandler(
+		validator,
+		cartservice.NewService(store.Carts, store.Products),
+	)
+	orderHandler := handler.NewOrderHandler(
+		validator,
+		orderservice.NewService(db, store.Orders, store.Carts, store.Users, store.Products),
+	)
 
 	engine.Use(middleware.Authenticate(cfg.Auth, tokenManager, store.Users))
 
@@ -79,6 +89,13 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 			meGroup.GET("/reviews", reviewHandler.ListMine)
 		}
 
+		cartGroup := api.Group("/cart")
+		{
+			cartGroup.GET("", cartHandler.Get)
+			cartGroup.POST("/items", cartHandler.AddItem)
+			cartGroup.DELETE("/items/:productID", cartHandler.RemoveItem)
+		}
+
 		productGroup := api.Group("/products")
 		{
 			productGroup.GET("", productHandler.List)
@@ -96,6 +113,13 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 			reviewGroup.POST("", middleware.RequireAuth(), reviewHandler.Upsert)
 		}
 
+		orderGroup := api.Group("/orders", middleware.RequireAuth())
+		{
+			orderGroup.POST("", orderHandler.Create)
+			orderGroup.GET("/mine", orderHandler.ListMine)
+			orderGroup.GET("/:id", orderHandler.Get)
+		}
+
 		adminProductGroup := api.Group("/admin/products", middleware.RequireAdmin())
 		{
 			adminProductGroup.GET("", productHandler.List)
@@ -103,6 +127,13 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 			adminProductGroup.GET("/:id", productHandler.GetByID)
 			adminProductGroup.PUT("/:id", productHandler.Update)
 			adminProductGroup.DELETE("/:id", productHandler.Delete)
+		}
+
+		adminOrderGroup := api.Group("/admin/orders", middleware.RequireAdmin())
+		{
+			adminOrderGroup.GET("", orderHandler.List)
+			adminOrderGroup.PUT("/:id/pay", orderHandler.MarkPaid)
+			adminOrderGroup.PUT("/:id/deliver", orderHandler.MarkDelivered)
 		}
 	}
 

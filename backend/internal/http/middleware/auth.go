@@ -15,7 +15,10 @@ import (
 	"mini-store-go/backend/internal/repository"
 )
 
-const currentUserKey = "current_user"
+const (
+	currentUserKey = "current_user"
+	sessionCartKey = "session_cart_id"
+)
 
 type AuthenticatedUser struct {
 	ID            string      `json:"id"`
@@ -50,11 +53,13 @@ func NewAuthenticatedUser(user *model.User) *AuthenticatedUser {
 
 func SessionCartCookie(cfg config.AuthConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if _, err := c.Cookie(cfg.SessionCartCookieName); err != nil {
+		sessionCartID, err := c.Cookie(cfg.SessionCartCookieName)
+		if err != nil || sessionCartID == "" {
+			sessionCartID = uuid.NewString()
 			c.SetSameSite(ParseSameSite(cfg.CookieSameSite))
 			c.SetCookie(
 				cfg.SessionCartCookieName,
-				uuid.NewString(),
+				sessionCartID,
 				int((365 * 24 * time.Hour).Seconds()),
 				"/",
 				cfg.CookieDomain,
@@ -62,6 +67,7 @@ func SessionCartCookie(cfg config.AuthConfig) gin.HandlerFunc {
 				cfg.CookieHTTPOnly,
 			)
 		}
+		c.Set(sessionCartKey, sessionCartID)
 		c.Next()
 	}
 }
@@ -130,6 +136,15 @@ func CurrentUser(c *gin.Context) *model.User {
 	}
 	user, _ := value.(*model.User)
 	return user
+}
+
+func SessionCartID(c *gin.Context) string {
+	value, exists := c.Get(sessionCartKey)
+	if !exists {
+		return ""
+	}
+	sessionCartID, _ := value.(string)
+	return sessionCartID
 }
 
 func ParseSameSite(value string) http.SameSite {

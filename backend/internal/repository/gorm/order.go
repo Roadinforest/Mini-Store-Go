@@ -32,7 +32,7 @@ func (r *orderRepository) GetByID(ctx context.Context, id string) (*model.Order,
 func (r *orderRepository) ListByUserID(ctx context.Context, userID string, page dto.PageParams) ([]model.Order, int64, error) {
 	page = page.Normalize(20)
 
-	query := r.db.WithContext(ctx).Model(&model.Order{}).Where("user_id = ?", userID)
+	query := r.db.WithContext(ctx).Model(&model.Order{}).Where(`"userId" = ?`, userID)
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -41,7 +41,8 @@ func (r *orderRepository) ListByUserID(ctx context.Context, userID string, page 
 
 	var orders []model.Order
 	if err := query.
-		Order("created_at DESC").
+		Preload("OrderItems").
+		Order(`"createdAt" DESC`).
 		Offset(page.Offset()).
 		Limit(page.Limit).
 		Find(&orders).Error; err != nil {
@@ -62,7 +63,9 @@ func (r *orderRepository) List(ctx context.Context, page dto.PageParams) ([]mode
 
 	var orders []model.Order
 	if err := query.
-		Order("created_at DESC").
+		Preload("User").
+		Preload("OrderItems").
+		Order(`"createdAt" DESC`).
 		Offset(page.Offset()).
 		Limit(page.Limit).
 		Find(&orders).Error; err != nil {
