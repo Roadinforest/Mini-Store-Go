@@ -68,7 +68,7 @@ func (r *productRepository) List(ctx context.Context, filter dto.ProductListFilt
 func (r *productRepository) ListLatest(ctx context.Context, limit int) ([]model.Product, error) {
 	var products []model.Product
 	if err := r.db.WithContext(ctx).
-		Order("created_at DESC").
+		Order(`"createdAt" DESC`).
 		Limit(limit).
 		Find(&products).Error; err != nil {
 		return nil, err
@@ -79,8 +79,8 @@ func (r *productRepository) ListLatest(ctx context.Context, limit int) ([]model.
 func (r *productRepository) ListFeatured(ctx context.Context, limit int) ([]model.Product, error) {
 	var products []model.Product
 	if err := r.db.WithContext(ctx).
-		Where("is_featured = ?", true).
-		Order("created_at DESC").
+		Where(`"isFeatured" = ?`, true).
+		Order(`"createdAt" DESC`).
 		Limit(limit).
 		Find(&products).Error; err != nil {
 		return nil, err
@@ -147,6 +147,6 @@ func applyProductSort(query *gorm.DB, sort string) *gorm.DB {
 	case "rating":
 		return query.Order("rating DESC")
 	default:
-		return query.Order("created_at DESC")
+		return query.Order(`"createdAt" DESC`)
 	}
 }

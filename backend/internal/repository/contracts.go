@@ -49,6 +49,7 @@ type ReviewRepository interface {
 	GetByID(ctx context.Context, id string) (*model.Review, error)
 	GetByUserAndProduct(ctx context.Context, userID, productID string) (*model.Review, error)
 	ListByProductID(ctx context.Context, productID string) ([]model.Review, error)
+	ListByUserID(ctx context.Context, userID string, page dto.PageParams) ([]model.Review, int64, error)
 	Create(ctx context.Context, review *model.Review) error
 	Update(ctx context.Context, review *model.Review) error
 }
