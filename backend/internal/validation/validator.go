@@ -2,6 +2,7 @@ package validation
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -20,8 +21,22 @@ type Validator struct {
 }
 
 func New() *Validator {
+	engine := validator.New(validator.WithRequiredStructEnabled())
+	engine.RegisterTagNameFunc(func(field reflect.StructField) string {
+		tag := field.Tag.Get("json")
+		if tag == "" {
+			return field.Name
+		}
+
+		name := strings.Split(tag, ",")[0]
+		if name == "" || name == "-" {
+			return field.Name
+		}
+		return name
+	})
+
 	return &Validator{
-		engine: validator.New(validator.WithRequiredStructEnabled()),
+		engine: engine,
 	}
 }
 
@@ -35,7 +50,7 @@ func (v *Validator) Validate(input interface{}) error {
 		fields := make([]FieldError, 0, len(validationErrors))
 		for _, item := range validationErrors {
 			fields = append(fields, FieldError{
-				Field: strings.ToLower(item.Field()),
+				Field: item.Field(),
 				Tag:   item.Tag(),
 				Value: fmt.Sprint(item.Value()),
 			})

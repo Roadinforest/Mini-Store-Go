@@ -62,7 +62,15 @@ func (s *Service) UpdateAddress(ctx context.Context, userID string, input dto.Up
 		return nil, err
 	}
 
-	user.Address = valueobject.NewJSON(valueobject.ShippingAddress(input))
+	user.Address = valueobject.NewJSON(valueobject.ShippingAddress{
+		FullName:      input.FullName,
+		StreetAddress: input.StreetAddress,
+		City:          input.City,
+		PostalCode:    input.PostalCode,
+		Country:       input.Country,
+		Lat:           input.Lat,
+		Lng:           input.Lng,
+	})
 	user.UpdatedAt = time.Now().UTC()
 
 	if err := s.users.Update(ctx, user); err != nil {
