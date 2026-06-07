@@ -11,6 +11,7 @@ import (
 	"mini-store-go/backend/internal/http/handler"
 	"mini-store-go/backend/internal/http/middleware"
 	gormrepo "mini-store-go/backend/internal/repository/gorm"
+	adminservice "mini-store-go/backend/internal/service/admin"
 	authservice "mini-store-go/backend/internal/service/auth"
 	cartservice "mini-store-go/backend/internal/service/cart"
 	orderservice "mini-store-go/backend/internal/service/order"
@@ -62,6 +63,10 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 	orderHandler := handler.NewOrderHandler(
 		validator,
 		orderservice.NewService(db, store.Orders, store.Carts, store.Users, store.Products),
+	)
+	adminHandler := handler.NewAdminHandler(
+		validator,
+		adminservice.NewService(db, store.Users),
 	)
 
 	engine.Use(middleware.Authenticate(cfg.Auth, tokenManager, store.Users))
@@ -134,6 +139,18 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 			adminOrderGroup.GET("", orderHandler.List)
 			adminOrderGroup.PUT("/:id/pay", orderHandler.MarkPaid)
 			adminOrderGroup.PUT("/:id/deliver", orderHandler.MarkDelivered)
+		}
+
+		adminUserGroup := api.Group("/admin/users", middleware.RequireAdmin())
+		{
+			adminUserGroup.GET("", adminHandler.ListUsers)
+			adminUserGroup.PUT("/:id", adminHandler.UpdateUser)
+			adminUserGroup.DELETE("/:id", adminHandler.DeleteUser)
+		}
+
+		adminGroup := api.Group("/admin", middleware.RequireAdmin())
+		{
+			adminGroup.GET("/overview", adminHandler.Overview)
 		}
 	}
 

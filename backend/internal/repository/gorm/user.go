@@ -49,7 +49,7 @@ func (r *userRepository) List(ctx context.Context, filter dto.UserListFilter) ([
 	}
 
 	var users []model.User
-	if err := query.Order("created_at DESC").Offset(filter.Offset()).Limit(filter.Limit).Find(&users).Error; err != nil {
+	if err := query.Order(`"createdAt" DESC`).Offset(filter.Offset()).Limit(filter.Limit).Find(&users).Error; err != nil {
 		return nil, 0, err
 	}
 	return users, total, nil
