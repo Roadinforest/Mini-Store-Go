@@ -124,7 +124,7 @@ export function ProductPage() {
           <Button
             className="mt-4 w-full"
             disabled={product.stock <= 0}
-            onClick={() => setMessage(addToCart(product.id).message)}
+            onClick={async () => setMessage((await addToCart(product.id)).message)}
           >
             Add to cart
           </Button>

@@ -2,11 +2,13 @@ import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "@/app/store";
 import { Button } from "@/components/common/Button";
 import { formatCurrency } from "@/lib/utils";
+import { useState } from "react";
 
 export function CartPage() {
   const navigate = useNavigate();
   const { state, addToCart, removeFromCart } = useStore();
   const { cart } = state;
+  const [message, setMessage] = useState("");
 
   if (cart.items.length === 0) {
     return (
@@ -38,11 +40,11 @@ export function CartPage() {
                 </td>
                 <td className="border-y p-3">
                   <div className="flex-center gap-3">
-                    <Button variant="outline" onClick={() => removeFromCart(item.productId)}>
+                    <Button variant="outline" onClick={async () => setMessage((await removeFromCart(item.productId)).message)}>
                       -
                     </Button>
                     <span>{item.qty}</span>
-                    <Button variant="outline" onClick={() => addToCart(item.productId)}>
+                    <Button variant="outline" onClick={async () => setMessage((await addToCart(item.productId)).message)}>
                       +
                     </Button>
                   </div>
@@ -78,6 +80,7 @@ export function CartPage() {
         <Button className="w-full" onClick={() => navigate("/shipping-address")}>
           Proceed to checkout
         </Button>
+        {message && <div className="mt-3 text-sm text-muted-foreground">{message}</div>}
       </div>
     </div>
   );

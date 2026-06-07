@@ -1,10 +1,28 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { useStore } from "@/app/store";
+import * as api from "@/lib/api";
+import type { Order } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export function UserOrdersPage() {
-  const { currentUser, state } = useStore();
-  const orders = state.orders.filter((order) => order.userId === currentUser?.id);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      const result = await api.getMyOrders();
+      if (cancelled) return;
+      setOrders(result.data?.items ?? []);
+      setLoading(false);
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -20,16 +38,24 @@ export function UserOrdersPage() {
             </tr>
           </thead>
           <tbody>
-            {orders.map((order) => (
-              <tr key={order.id} className="border-t">
-                <td className="p-4">
-                  <Link to={`/order/${order.id}`}>{order.id.slice(0, 8)}</Link>
+            {loading ? (
+              <tr>
+                <td className="p-4 text-muted-foreground" colSpan={4}>
+                  Loading orders...
                 </td>
-                <td className="p-4">{formatDate(order.createdAt)}</td>
-                <td className="p-4">{formatCurrency(order.totalPrice)}</td>
-                <td className="p-4">{order.isPaid ? "Yes" : "No"}</td>
               </tr>
-            ))}
+            ) : (
+              orders.map((order) => (
+                <tr key={order.id} className="border-t">
+                  <td className="p-4">
+                    <Link to={`/order/${order.id}`}>{order.id.slice(0, 8)}</Link>
+                  </td>
+                  <td className="p-4">{formatDate(order.createdAt)}</td>
+                  <td className="p-4">{formatCurrency(order.totalPrice)}</td>
+                  <td className="p-4">{order.isPaid ? "Yes" : "No"}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

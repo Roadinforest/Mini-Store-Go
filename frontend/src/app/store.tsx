@@ -35,14 +35,14 @@ type StoreContextValue = {
   signIn: (payload: AuthPayload) => Promise<Result>;
   signUp: (payload: SignUpPayload) => Promise<Result>;
   signOut: () => Promise<void>;
-  addToCart: (productId: string) => Result;
-  removeFromCart: (productId: string) => void;
+  addToCart: (productId: string) => Promise<Result>;
+  removeFromCart: (productId: string) => Promise<Result>;
   setShippingAddress: (address: ShippingAddress) => Promise<Result>;
   setPaymentMethod: (method: string) => Promise<Result>;
   updateProfile: (payload: ProfilePayload) => Promise<Result>;
-  placeOrder: () => { success: boolean; message: string; orderId?: string };
-  markOrderPaid: (orderId: string) => { success: boolean; message: string };
-  markOrderDelivered: (orderId: string) => void;
+  placeOrder: () => Promise<{ success: boolean; message: string; orderId?: string }>;
+  markOrderPaid: (orderId: string) => Promise<{ success: boolean; message: string }>;
+  markOrderDelivered: (orderId: string) => Promise<{ success: boolean; message: string }>;
   saveProduct: (draft: ProductDraft) => void;
   deleteProduct: (productId: string) => void;
   updateUser: (userId: string, payload: Pick<User, "name" | "role">) => void;
@@ -110,14 +110,20 @@ export function StoreProvider({ children }: PropsWithChildren) {
     let cancelled = false;
 
     async function bootstrapAuth() {
-      const result = await authApi.getCurrentUser();
+      const [authResult, cartResult] = await Promise.all([
+        authApi.getCurrentUser(),
+        authApi.getCart(),
+      ]);
       if (cancelled) return;
 
-      if (result.success && result.data) {
-        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
-        dispatch({ type: "SIGN_IN", payload: result.data.id });
+      if (authResult.success && authResult.data) {
+        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, authResult.data) });
+        dispatch({ type: "SIGN_IN", payload: authResult.data.id });
       } else {
         dispatch({ type: "SIGN_OUT" });
+      }
+      if (cartResult.success && cartResult.data) {
+        dispatch({ type: "SET_CART", payload: cartResult.data });
       }
 
       setAuthReady(true);
@@ -167,48 +173,23 @@ export function StoreProvider({ children }: PropsWithChildren) {
         await authApi.signOut();
         dispatch({ type: "SIGN_OUT" });
       },
-      addToCart(productId) {
+      async addToCart(productId) {
         const product = state.products.find((item) => item.id === productId);
         if (!product) return { success: false, message: "Product not found." };
-        if (product.stock <= 0) return { success: false, message: "Not enough stock." };
-
-        const existing = state.cart.items.find((item) => item.productId === productId);
-        const nextQty = (existing?.qty ?? 0) + 1;
-        if (nextQty > product.stock) {
-          return { success: false, message: "Not enough stock." };
+        const result = await authApi.addCartItem(productId);
+        if (!result.success || !result.data) {
+          return { success: false, message: result.message };
         }
-
-        const nextItems = existing
-          ? state.cart.items.map((item) =>
-              item.productId === productId ? { ...item, qty: nextQty } : item,
-            )
-          : [
-              ...state.cart.items,
-              {
-                productId: product.id,
-                name: product.name,
-                slug: product.slug,
-                qty: 1,
-                image: product.images[0],
-                price: product.price,
-              },
-            ];
-
-        dispatch({ type: "SET_CART", payload: calcCart(nextItems) });
+        dispatch({ type: "SET_CART", payload: result.data });
         return { success: true, message: `${product.name} added to cart.` };
       },
-      removeFromCart(productId) {
-        const existing = state.cart.items.find((item) => item.productId === productId);
-        if (!existing) return;
-
-        const nextItems =
-          existing.qty <= 1
-            ? state.cart.items.filter((item) => item.productId !== productId)
-            : state.cart.items.map((item) =>
-                item.productId === productId ? { ...item, qty: item.qty - 1 } : item,
-              );
-
-        dispatch({ type: "SET_CART", payload: calcCart(nextItems) });
+      async removeFromCart(productId) {
+        const result = await authApi.removeCartItem(productId);
+        if (!result.success || !result.data) {
+          return { success: false, message: result.message };
+        }
+        dispatch({ type: "SET_CART", payload: result.data });
+        return { success: true, message: "Cart updated." };
       },
       async setShippingAddress(address) {
         if (!currentUser) {
@@ -243,75 +224,36 @@ export function StoreProvider({ children }: PropsWithChildren) {
         dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
         return { success: true, message: "Profile updated." };
       },
-      placeOrder() {
-        if (!currentUser) {
-          return { success: false, message: "Please sign in first." };
+      async placeOrder() {
+        const result = await authApi.createOrder();
+        if (!result.success || !result.data) {
+          return { success: false, message: result.message };
         }
-        if (state.cart.items.length === 0) {
-          return { success: false, message: "Cart is empty." };
-        }
-        if (!currentUser.address) {
-          return { success: false, message: "Shipping address is required." };
-        }
-        if (!currentUser.paymentMethod) {
-          return { success: false, message: "Payment method is required." };
-        }
-
-        const order: Order = {
-          id: crypto.randomUUID(),
-          userId: currentUser.id,
-          shippingAddress: currentUser.address,
-          paymentMethod: currentUser.paymentMethod,
-          itemsPrice: state.cart.itemsPrice,
-          shippingPrice: state.cart.shippingPrice,
-          taxPrice: state.cart.taxPrice,
-          totalPrice: state.cart.totalPrice,
-          isPaid: false,
-          paidAt: null,
-          isDelivered: false,
-          deliveredAt: null,
-          createdAt: new Date().toISOString(),
-          orderitems: state.cart.items,
-        };
-
-        dispatch({ type: "SET_ORDERS", payload: [order, ...state.orders] });
+        dispatch({ type: "SET_ORDERS", payload: [result.data, ...state.orders] });
         dispatch({ type: "SET_CART", payload: calcCart([]) });
-        return { success: true, message: "Order created.", orderId: order.id };
+        return { success: true, message: "Order created.", orderId: result.data.id };
       },
-      markOrderPaid(orderId) {
-        const order = state.orders.find((item) => item.id === orderId);
-        if (!order) return { success: false, message: "Order not found." };
-        if (order.isPaid) return { success: false, message: "Order already paid." };
-
-        for (const item of order.orderitems) {
-          const product = state.products.find((candidate) => candidate.id === item.productId);
-          if (!product || product.stock < item.qty) {
-            return { success: false, message: `Not enough stock for ${item.name}.` };
-          }
+      async markOrderPaid(orderId) {
+        const result = await authApi.markOrderPaid(orderId);
+        if (!result.success || !result.data) {
+          return { success: false, message: result.message };
         }
-
-        const nextProducts = state.products.map((product) => {
-          const match = order.orderitems.find((item) => item.productId === product.id);
-          if (!match) return product;
-          return { ...product, stock: product.stock - match.qty };
+        dispatch({
+          type: "SET_ORDERS",
+          payload: state.orders.map((item) => (item.id === orderId ? result.data! : item)),
         });
-        const nextOrders = state.orders.map((item) =>
-          item.id === orderId
-            ? { ...item, isPaid: true, paidAt: new Date().toISOString() }
-            : item,
-        );
-
-        dispatch({ type: "SET_PRODUCTS", payload: nextProducts });
-        dispatch({ type: "SET_ORDERS", payload: nextOrders });
         return { success: true, message: "Order marked as paid." };
       },
-      markOrderDelivered(orderId) {
-        const nextOrders = state.orders.map((item) =>
-          item.id === orderId
-            ? { ...item, isDelivered: true, deliveredAt: new Date().toISOString() }
-            : item,
-        );
-        dispatch({ type: "SET_ORDERS", payload: nextOrders });
+      async markOrderDelivered(orderId) {
+        const result = await authApi.markOrderDelivered(orderId);
+        if (!result.success || !result.data) {
+          return { success: false, message: result.message };
+        }
+        dispatch({
+          type: "SET_ORDERS",
+          payload: state.orders.map((item) => (item.id === orderId ? result.data! : item)),
+        });
+        return { success: true, message: "Order marked as delivered." };
       },
       saveProduct(draft) {
         const normalized: Product = {

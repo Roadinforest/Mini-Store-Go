@@ -1,4 +1,4 @@
-import type { Product, ProductDraft, Review, ShippingAddress, User } from "@/lib/types";
+import type { AdminOverview, Cart, CartItem, Order, Product, ProductDraft, Review, ShippingAddress, User } from "@/lib/types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080/api/v1";
 
@@ -14,7 +14,9 @@ type ApiUser = {
   name: string;
   email: string;
   role: "admin" | "user";
+  image?: string | null;
   payment_method?: string | null;
+  created_at?: string;
   address?: {
     full_name: string;
     street_address: string;
@@ -67,11 +69,69 @@ type ApiCategoryCount = {
   count: number;
 };
 
+type ApiCartItem = {
+  product_id: string;
+  name: string;
+  slug: string;
+  qty: number;
+  image: string;
+  price: number;
+};
+
+type ApiCart = {
+  id?: string;
+  user_id?: string | null;
+  session_cart_id: string;
+  items: ApiCartItem[];
+  items_price: number;
+  shipping_price: number;
+  tax_price: number;
+  total_price: number;
+  created_at?: string;
+};
+
+type ApiOrderItem = ApiCartItem;
+
+type ApiOrder = {
+  id: string;
+  user_id: string;
+  shipping_address: {
+    full_name: string;
+    street_address: string;
+    city: string;
+    postal_code: string;
+    country: string;
+  };
+  payment_method: string;
+  items_price: number;
+  shipping_price: number;
+  tax_price: number;
+  total_price: number;
+  is_paid: boolean;
+  paid_at?: string | null;
+  is_delivered: boolean;
+  delivered_at?: string | null;
+  created_at: string;
+  order_items: ApiOrderItem[];
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+  };
+};
+
 type ApiPageMeta = {
   page: number;
   limit: number;
   total: number;
   total_pages: number;
+};
+
+type ApiAdminOverview = {
+  order_count: number;
+  product_count: number;
+  user_count: number;
+  total_sales: number;
 };
 
 type ApiPaged<T> = {
@@ -221,6 +281,36 @@ export async function getAdminProducts(params: { page?: number; limit?: number }
   return request<CatalogPage<Product>>(`/admin/products${query ? `?${query}` : ""}`, { method: "GET" });
 }
 
+export async function getAdminOverview(): Promise<ApiResult<AdminOverview>> {
+  return request<AdminOverview>("/admin/overview", { method: "GET" });
+}
+
+export async function getAdminUsers(params: { page?: number; limit?: number; q?: string } = {}): Promise<ApiResult<CatalogPage<User>>> {
+  const search = new URLSearchParams();
+  if (params.page) search.set("page", String(params.page));
+  if (params.limit) search.set("limit", String(params.limit));
+  if (params.q) search.set("q", params.q);
+  const query = search.toString();
+  return request<CatalogPage<User>>(`/admin/users${query ? `?${query}` : ""}`, { method: "GET" });
+}
+
+export async function updateAdminUser(userID: string, payload: {
+  name: string;
+  email: string;
+  role: "admin" | "user";
+}): Promise<ApiResult<User>> {
+  return request<User>(`/admin/users/${userID}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteAdminUser(userID: string): Promise<ApiResult<{ deleted: boolean }>> {
+  return request<{ deleted: boolean }>(`/admin/users/${userID}`, {
+    method: "DELETE",
+  });
+}
+
 export async function createProduct(payload: ProductDraft): Promise<ApiResult<Product>> {
   return request<Product>("/admin/products", {
     method: "POST",
@@ -232,6 +322,49 @@ export async function deleteProduct(productID: string): Promise<ApiResult<{ dele
   return request<{ deleted: boolean }>(`/admin/products/${productID}`, {
     method: "DELETE",
   });
+}
+
+export async function getCart(): Promise<ApiResult<Cart>> {
+  return request<Cart>("/cart", { method: "GET" });
+}
+
+export async function addCartItem(productID: string): Promise<ApiResult<Cart>> {
+  return request<Cart>("/cart/items", {
+    method: "POST",
+    body: JSON.stringify({ product_id: productID }),
+  });
+}
+
+export async function removeCartItem(productID: string): Promise<ApiResult<Cart>> {
+  return request<Cart>(`/cart/items/${productID}`, {
+    method: "DELETE",
+  });
+}
+
+export async function createOrder(): Promise<ApiResult<Order>> {
+  return request<Order>("/orders", {
+    method: "POST",
+  });
+}
+
+export async function getMyOrders(): Promise<ApiResult<CatalogPage<Order>>> {
+  return request<CatalogPage<Order>>("/orders/mine", { method: "GET" });
+}
+
+export async function getOrderByID(orderID: string): Promise<ApiResult<Order>> {
+  return request<Order>(`/orders/${orderID}`, { method: "GET" });
+}
+
+export async function getAdminOrders(): Promise<ApiResult<CatalogPage<Order>>> {
+  return request<CatalogPage<Order>>("/admin/orders", { method: "GET" });
+}
+
+export async function markOrderPaid(orderID: string): Promise<ApiResult<Order>> {
+  return request<Order>(`/admin/orders/${orderID}/pay`, { method: "PUT" });
+}
+
+export async function markOrderDelivered(orderID: string): Promise<ApiResult<Order>> {
+  return request<Order>(`/admin/orders/${orderID}/deliver`, { method: "PUT" });
 }
 
 async function request<T>(path: string, init: RequestInit): Promise<ApiResult<T>> {
@@ -268,9 +401,14 @@ async function request<T>(path: string, init: RequestInit): Promise<ApiResult<T>
 }
 
 function transformData(value: unknown): unknown {
+  if (isApiAdminOverview(value)) return toAdminOverview(value);
   if (isApiUser(value)) return toUser(value);
   if (isApiProduct(value)) return toProduct(value);
   if (isApiReview(value)) return toReview(value);
+  if (isApiCart(value)) return toCart(value);
+  if (isApiOrder(value)) return toOrder(value);
+  if (isApiPagedOrders(value)) return toOrderCatalogPage(value);
+  if (isApiPagedUsers(value)) return toUserCatalogPage(value);
   if (isApiPagedProducts(value)) return toCatalogPage(value);
   if (Array.isArray(value)) {
     if (value.every(isApiProduct)) return value.map(toProduct);
@@ -283,6 +421,10 @@ function isApiUser(value: unknown): value is ApiUser {
   return Boolean(value) && typeof value === "object" && "id" in (value as Record<string, unknown>) && "email" in (value as Record<string, unknown>);
 }
 
+function isApiAdminOverview(value: unknown): value is ApiAdminOverview {
+  return Boolean(value) && typeof value === "object" && "order_count" in (value as Record<string, unknown>) && "total_sales" in (value as Record<string, unknown>);
+}
+
 function isApiProduct(value: unknown): value is ApiProduct {
   return Boolean(value) && typeof value === "object" && "slug" in (value as Record<string, unknown>) && "num_reviews" in (value as Record<string, unknown>);
 }
@@ -292,7 +434,35 @@ function isApiReview(value: unknown): value is ApiReview {
 }
 
 function isApiPagedProducts(value: unknown): value is ApiPaged<ApiProduct> {
-  return Boolean(value) && typeof value === "object" && "items" in (value as Record<string, unknown>) && "meta" in (value as Record<string, unknown>);
+  if (!Boolean(value) || typeof value !== "object" || !("items" in (value as Record<string, unknown>)) || !("meta" in (value as Record<string, unknown>))) {
+    return false;
+  }
+  const items = (value as { items?: unknown[] }).items;
+  return Array.isArray(items) && (items.length === 0 || items.every(isApiProduct));
+}
+
+function isApiPagedUsers(value: unknown): value is ApiPaged<ApiUser> {
+  if (!Boolean(value) || typeof value !== "object" || !("items" in (value as Record<string, unknown>)) || !("meta" in (value as Record<string, unknown>))) {
+    return false;
+  }
+  const items = (value as { items?: unknown[] }).items;
+  return Array.isArray(items) && (items.length === 0 || items.every(isApiUser));
+}
+
+function isApiCart(value: unknown): value is ApiCart {
+  return Boolean(value) && typeof value === "object" && "session_cart_id" in (value as Record<string, unknown>) && "items_price" in (value as Record<string, unknown>);
+}
+
+function isApiOrder(value: unknown): value is ApiOrder {
+  return Boolean(value) && typeof value === "object" && "shipping_address" in (value as Record<string, unknown>) && "order_items" in (value as Record<string, unknown>);
+}
+
+function isApiPagedOrders(value: unknown): value is ApiPaged<ApiOrder> {
+  if (!Boolean(value) || typeof value !== "object" || !("items" in (value as Record<string, unknown>)) || !("meta" in (value as Record<string, unknown>))) {
+    return false;
+  }
+  const items = (value as { items?: unknown[] }).items;
+  return Array.isArray(items) && (items.length === 0 || items.every(isApiOrder));
 }
 
 function toUser(user: ApiUser): User {
@@ -303,7 +473,16 @@ function toUser(user: ApiUser): User {
     role: user.role,
     paymentMethod: user.payment_method ?? undefined,
     address: user.address ? toShippingAddress(user.address) : undefined,
-    createdAt: new Date().toISOString(),
+    createdAt: user.created_at ?? new Date().toISOString(),
+  };
+}
+
+function toAdminOverview(overview: ApiAdminOverview): AdminOverview {
+  return {
+    orderCount: overview.order_count,
+    productCount: overview.product_count,
+    userCount: overview.user_count,
+    totalSales: overview.total_sales,
   };
 }
 
@@ -344,6 +523,71 @@ function toReview(review: ApiReview): Review {
 function toCatalogPage(page: ApiPaged<ApiProduct>): CatalogPage<Product> {
   return {
     items: page.items.map(toProduct),
+    meta: {
+      page: page.meta.page,
+      limit: page.meta.limit,
+      total: page.meta.total,
+      totalPages: page.meta.total_pages,
+    },
+  };
+}
+
+function toUserCatalogPage(page: ApiPaged<ApiUser>): CatalogPage<User> {
+  return {
+    items: page.items.map(toUser),
+    meta: {
+      page: page.meta.page,
+      limit: page.meta.limit,
+      total: page.meta.total,
+      totalPages: page.meta.total_pages,
+    },
+  };
+}
+
+function toCart(cart: ApiCart): Cart {
+  return {
+    items: cart.items.map(toCartItem),
+    itemsPrice: cart.items_price,
+    shippingPrice: cart.shipping_price,
+    taxPrice: cart.tax_price,
+    totalPrice: cart.total_price,
+  };
+}
+
+function toCartItem(item: ApiCartItem): CartItem {
+  return {
+    productId: item.product_id,
+    name: item.name,
+    slug: item.slug,
+    qty: item.qty,
+    image: item.image,
+    price: item.price,
+  };
+}
+
+function toOrder(order: ApiOrder): Order {
+  return {
+    id: order.id,
+    userId: order.user_id,
+    shippingAddress: toShippingAddress(order.shipping_address),
+    paymentMethod: order.payment_method,
+    itemsPrice: order.items_price,
+    shippingPrice: order.shipping_price,
+    taxPrice: order.tax_price,
+    totalPrice: order.total_price,
+    isPaid: order.is_paid,
+    paidAt: order.paid_at ?? null,
+    isDelivered: order.is_delivered,
+    deliveredAt: order.delivered_at ?? null,
+    createdAt: order.created_at,
+    orderitems: order.order_items.map(toCartItem),
+    user: order.user,
+  };
+}
+
+function toOrderCatalogPage(page: ApiPaged<ApiOrder>): CatalogPage<Order> {
+  return {
+    items: page.items.map(toOrder),
     meta: {
       page: page.meta.page,
       limit: page.meta.limit,

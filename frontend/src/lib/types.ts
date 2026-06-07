@@ -36,6 +36,13 @@ export type User = {
   createdAt: string;
 };
 
+export type AdminOverview = {
+  orderCount: number;
+  productCount: number;
+  userCount: number;
+  totalSales: number;
+};
+
 export type Review = {
   id: string;
   userId: string;
@@ -91,6 +98,11 @@ export type Order = {
   deliveredAt: string | null;
   createdAt: string;
   orderitems: OrderItem[];
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+  };
 };
 
 export type ProductDraft = Omit<Product, "id" | "rating" | "numReviews" | "createdAt"> & {

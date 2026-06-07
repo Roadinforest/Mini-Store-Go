@@ -1,10 +1,46 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { useStore } from "@/app/store";
 import { Button } from "@/components/common/Button";
+import * as api from "@/lib/api";
+import type { Order } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export function AdminOrdersPage() {
-  const { state, markOrderDelivered, markOrderPaid } = useStore();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      const result = await api.getAdminOrders();
+      if (cancelled) return;
+      setOrders(result.data?.items ?? []);
+      setLoading(false);
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function onMarkPaid(orderId: string) {
+    const result = await api.markOrderPaid(orderId);
+    setMessage(result.message);
+    if (result.success && result.data) {
+      setOrders((current) => current.map((order) => (order.id === orderId ? result.data! : order)));
+    }
+  }
+
+  async function onMarkDelivered(orderId: string) {
+    const result = await api.markOrderDelivered(orderId);
+    setMessage(result.message);
+    if (result.success && result.data) {
+      setOrders((current) => current.map((order) => (order.id === orderId ? result.data! : order)));
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -21,31 +57,40 @@ export function AdminOrdersPage() {
             </tr>
           </thead>
           <tbody>
-            {state.orders.map((order) => (
-              <tr key={order.id} className="border-t">
-                <td className="p-4">
-                  <Link to={`/order/${order.id}`}>{order.id.slice(0, 8)}</Link>
-                </td>
-                <td className="p-4">{formatDate(order.createdAt)}</td>
-                <td className="p-4">{formatCurrency(order.totalPrice)}</td>
-                <td className="p-4">
-                  {order.isPaid ? "Paid" : "Pending"} / {order.isDelivered ? "Delivered" : "Shipping"}
-                </td>
-                <td className="p-4">
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => markOrderPaid(order.id)} disabled={order.isPaid}>
-                      Mark paid
-                    </Button>
-                    <Button variant="outline" onClick={() => markOrderDelivered(order.id)} disabled={!order.isPaid || order.isDelivered}>
-                      Deliver
-                    </Button>
-                  </div>
+            {loading ? (
+              <tr>
+                <td className="p-4 text-muted-foreground" colSpan={5}>
+                  Loading orders...
                 </td>
               </tr>
-            ))}
+            ) : (
+              orders.map((order) => (
+                <tr key={order.id} className="border-t">
+                  <td className="p-4">
+                    <Link to={`/order/${order.id}`}>{order.id.slice(0, 8)}</Link>
+                  </td>
+                  <td className="p-4">{formatDate(order.createdAt)}</td>
+                  <td className="p-4">{formatCurrency(order.totalPrice)}</td>
+                  <td className="p-4">
+                    {order.isPaid ? "Paid" : "Pending"} / {order.isDelivered ? "Delivered" : "Shipping"}
+                  </td>
+                  <td className="p-4">
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={() => void onMarkPaid(order.id)} disabled={order.isPaid}>
+                        Mark paid
+                      </Button>
+                      <Button variant="outline" onClick={() => void onMarkDelivered(order.id)} disabled={!order.isPaid || order.isDelivered}>
+                        Deliver
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
+      {message && <div className="text-sm text-muted-foreground">{message}</div>}
     </div>
   );
 }

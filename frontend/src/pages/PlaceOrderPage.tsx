@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "@/app/store";
 import { Button } from "@/components/common/Button";
@@ -6,9 +7,11 @@ import { formatCurrency } from "@/lib/utils";
 export function PlaceOrderPage() {
   const navigate = useNavigate();
   const { state, currentUser, placeOrder } = useStore();
+  const [message, setMessage] = useState("");
 
-  function submitOrder() {
-    const result = placeOrder();
+  async function submitOrder() {
+    const result = await placeOrder();
+    setMessage(result.message);
     if (result.success && result.orderId) {
       navigate(`/order/${result.orderId}`);
     }
@@ -66,6 +69,7 @@ export function PlaceOrderPage() {
         <Button className="mt-5 w-full" onClick={submitOrder}>
           Place order
         </Button>
+        {message && <div className="mt-3 text-sm text-muted-foreground">{message}</div>}
       </aside>
     </div>
   );
