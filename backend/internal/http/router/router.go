@@ -12,6 +12,8 @@ import (
 	"mini-store-go/backend/internal/http/middleware"
 	gormrepo "mini-store-go/backend/internal/repository/gorm"
 	authservice "mini-store-go/backend/internal/service/auth"
+	productservice "mini-store-go/backend/internal/service/product"
+	reviewservice "mini-store-go/backend/internal/service/review"
 	userservice "mini-store-go/backend/internal/service/user"
 	"mini-store-go/backend/internal/validation"
 )
@@ -43,6 +45,14 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 		validator,
 		userservice.NewService(store.Users),
 	)
+	productHandler := handler.NewProductHandler(
+		validator,
+		productservice.NewService(store.Products),
+	)
+	reviewHandler := handler.NewReviewHandler(
+		validator,
+		reviewservice.NewService(db, store.Reviews, store.Products),
+	)
 
 	engine.Use(middleware.Authenticate(cfg.Auth, tokenManager, store.Users))
 
@@ -66,6 +76,33 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 			meGroup.PUT("/profile", userHandler.UpdateProfile)
 			meGroup.PUT("/address", userHandler.UpdateAddress)
 			meGroup.PUT("/payment-method", userHandler.UpdatePaymentMethod)
+			meGroup.GET("/reviews", reviewHandler.ListMine)
+		}
+
+		productGroup := api.Group("/products")
+		{
+			productGroup.GET("", productHandler.List)
+			productGroup.GET("/featured", productHandler.Featured)
+			productGroup.GET("/latest", productHandler.Latest)
+			productGroup.GET("/categories", productHandler.Categories)
+			productGroup.GET("/slug/:slug", productHandler.GetBySlug)
+			productGroup.GET("/:id", productHandler.GetByID)
+		}
+
+		reviewGroup := api.Group("/reviews")
+		{
+			reviewGroup.GET("/product/:productID", reviewHandler.ListByProductID)
+			reviewGroup.GET("/mine", middleware.RequireAuth(), reviewHandler.Mine)
+			reviewGroup.POST("", middleware.RequireAuth(), reviewHandler.Upsert)
+		}
+
+		adminProductGroup := api.Group("/admin/products", middleware.RequireAdmin())
+		{
+			adminProductGroup.GET("", productHandler.List)
+			adminProductGroup.POST("", productHandler.Create)
+			adminProductGroup.GET("/:id", productHandler.GetByID)
+			adminProductGroup.PUT("/:id", productHandler.Update)
+			adminProductGroup.DELETE("/:id", productHandler.Delete)
 		}
 	}
 
