@@ -37,9 +37,9 @@ type StoreContextValue = {
   signOut: () => Promise<void>;
   addToCart: (productId: string) => Result;
   removeFromCart: (productId: string) => void;
-  setShippingAddress: (address: ShippingAddress) => void;
-  setPaymentMethod: (method: string) => void;
-  updateProfile: (payload: ProfilePayload) => Result;
+  setShippingAddress: (address: ShippingAddress) => Promise<Result>;
+  setPaymentMethod: (method: string) => Promise<Result>;
+  updateProfile: (payload: ProfilePayload) => Promise<Result>;
   placeOrder: () => { success: boolean; message: string; orderId?: string };
   markOrderPaid: (orderId: string) => { success: boolean; message: string };
   markOrderDelivered: (orderId: string) => void;
@@ -48,6 +48,8 @@ type StoreContextValue = {
   updateUser: (userId: string, payload: Pick<User, "name" | "role">) => void;
   deleteUser: (userId: string) => void;
   upsertReview: (productId: string, payload: ReviewPayload) => Result;
+  syncProducts: (products: Product[]) => void;
+  syncReviews: (reviews: Review[]) => void;
 };
 
 type Action =
@@ -208,31 +210,37 @@ export function StoreProvider({ children }: PropsWithChildren) {
 
         dispatch({ type: "SET_CART", payload: calcCart(nextItems) });
       },
-      setShippingAddress(address) {
-        if (!currentUser) return;
-        const nextUsers = state.users.map((user) =>
-          user.id === currentUser.id ? { ...user, address } : user,
-        );
-        dispatch({ type: "SET_USERS", payload: nextUsers });
-      },
-      setPaymentMethod(method) {
-        if (!currentUser) return;
-        const nextUsers = state.users.map((user) =>
-          user.id === currentUser.id ? { ...user, paymentMethod: method } : user,
-        );
-        dispatch({ type: "SET_USERS", payload: nextUsers });
-      },
-      updateProfile(payload) {
+      async setShippingAddress(address) {
         if (!currentUser) {
           return { success: false, message: "Sign in required." };
         }
-
-        const nextUsers = state.users.map((user) =>
-          user.id === currentUser.id
-            ? { ...user, name: payload.name, email: payload.email }
-            : user,
-        );
-        dispatch({ type: "SET_USERS", payload: nextUsers });
+        const result = await authApi.updateAddress(address);
+        if (!result.success || !result.data) {
+          return { success: false, message: result.message };
+        }
+        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
+        return { success: true, message: "Shipping address saved." };
+      },
+      async setPaymentMethod(method) {
+        if (!currentUser) {
+          return { success: false, message: "Sign in required." };
+        }
+        const result = await authApi.updatePaymentMethod({ type: method });
+        if (!result.success || !result.data) {
+          return { success: false, message: result.message };
+        }
+        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
+        return { success: true, message: "Payment method saved." };
+      },
+      async updateProfile(payload) {
+        if (!currentUser) {
+          return { success: false, message: "Sign in required." };
+        }
+        const result = await authApi.updateProfile(payload);
+        if (!result.success || !result.data) {
+          return { success: false, message: result.message };
+        }
+        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
         return { success: true, message: "Profile updated." };
       },
       placeOrder() {
@@ -391,6 +399,30 @@ export function StoreProvider({ children }: PropsWithChildren) {
         dispatch({ type: "SET_REVIEWS", payload: nextReviews });
         dispatch({ type: "SET_PRODUCTS", payload: nextProducts });
         return { success: true, message: "Review saved." };
+      },
+      syncProducts(products) {
+        const merged = [...state.products];
+        for (const incoming of products) {
+          const index = merged.findIndex((product) => product.id === incoming.id);
+          if (index >= 0) {
+            merged[index] = { ...merged[index], ...incoming };
+          } else {
+            merged.push(incoming);
+          }
+        }
+        dispatch({ type: "SET_PRODUCTS", payload: merged });
+      },
+      syncReviews(reviews) {
+        const merged = [...state.reviews];
+        for (const incoming of reviews) {
+          const index = merged.findIndex((review) => review.id === incoming.id);
+          if (index >= 0) {
+            merged[index] = { ...merged[index], ...incoming };
+          } else {
+            merged.push(incoming);
+          }
+        }
+        dispatch({ type: "SET_REVIEWS", payload: merged });
       },
     };
   }, [authReady, currentUser, state]);

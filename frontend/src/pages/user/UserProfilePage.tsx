@@ -8,10 +8,10 @@ export function UserProfilePage() {
 
   if (!currentUser) return null;
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    const result = updateProfile({
+    const result = await updateProfile({
       name: String(formData.get("name")),
       email: String(formData.get("email")),
     });

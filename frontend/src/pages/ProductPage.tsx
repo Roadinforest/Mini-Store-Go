@@ -1,37 +1,86 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useStore } from "@/app/store";
 import { Button } from "@/components/common/Button";
 import { Rating } from "@/components/common/Rating";
+import * as api from "@/lib/api";
+import type { Product, Review } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 
 export function ProductPage() {
   const { slug } = useParams();
-  const { state, currentUser, addToCart, upsertReview } = useStore();
+  const { currentUser, addToCart, syncProducts, syncReviews } = useStore();
   const [imageIndex, setImageIndex] = useState(0);
   const [message, setMessage] = useState("");
+  const [product, setProduct] = useState<Product | null>(null);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const product = state.products.find((item) => item.slug === slug);
-  const reviews = useMemo(
-    () => state.reviews.filter((review) => review.productId === product?.id),
-    [product?.id, state.reviews],
-  );
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    const currentSlug = slug;
+
+    async function load() {
+      setLoading(true);
+      const productResult = await api.getProductBySlug(currentSlug);
+      if (cancelled) return;
+      if (!productResult.success || !productResult.data) {
+        setProduct(null);
+        setReviews([]);
+        setLoading(false);
+        return;
+      }
+
+      setProduct(productResult.data);
+      syncProducts([productResult.data]);
+
+      const reviewsResult = await api.getProductReviews(productResult.data.id);
+      if (cancelled) return;
+      const nextReviews = reviewsResult.data ?? [];
+      setReviews(nextReviews);
+      syncReviews(nextReviews);
+      setLoading(false);
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
+  if (loading) {
+    return <div className="rounded-2xl border p-5 text-sm text-muted-foreground">Loading product...</div>;
+  }
 
   if (!product) {
     return <div>Product not found.</div>;
   }
 
-  function submitReview(event: FormEvent<HTMLFormElement>) {
+  async function submitReview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!product) return;
     const formData = new FormData(event.currentTarget);
-    const result = upsertReview(product.id, {
+    const result = await api.upsertReview({
+      product_id: product.id,
       rating: Number(formData.get("rating")),
       title: String(formData.get("title")),
       description: String(formData.get("description")),
     });
     setMessage(result.message);
     if (result.success) {
+      const [productResult, reviewsResult] = await Promise.all([
+        api.getProductByID(product.id),
+        api.getProductReviews(product.id),
+      ]);
+      if (productResult.success && productResult.data) {
+        setProduct(productResult.data);
+        syncProducts([productResult.data]);
+      }
+      if (reviewsResult.success && reviewsResult.data) {
+        setReviews(reviewsResult.data);
+        syncReviews(reviewsResult.data);
+      }
       event.currentTarget.reset();
     }
   }
@@ -88,13 +137,12 @@ export function ProductPage() {
           <h2 className="h2-bold mb-5">Customer Reviews</h2>
           <div className="space-y-4">
             {reviews.map((review) => {
-              const author = state.users.find((user) => user.id === review.userId);
               return (
                 <div key={review.id} className="rounded-2xl border p-4">
                   <div className="flex-between gap-3">
                     <div>
                       <div className="font-semibold">{review.title}</div>
-                      <div className="text-sm text-muted-foreground">{author?.name ?? "Unknown user"}</div>
+                      <div className="text-sm text-muted-foreground">{review.user?.name ?? "Unknown user"}</div>
                     </div>
                     <Rating value={review.rating} />
                   </div>

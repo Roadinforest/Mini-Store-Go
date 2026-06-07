@@ -8,18 +8,20 @@ export function ShippingAddressPage() {
   const { currentUser, setShippingAddress } = useStore();
   const [message, setMessage] = useState("");
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    setShippingAddress({
+    const result = await setShippingAddress({
       fullName: String(formData.get("fullName")),
       streetAddress: String(formData.get("streetAddress")),
       city: String(formData.get("city")),
       postalCode: String(formData.get("postalCode")),
       country: String(formData.get("country")),
     });
-    setMessage("Shipping address saved.");
-    navigate("/payment-method");
+    setMessage(result.message);
+    if (result.success) {
+      navigate("/payment-method");
+    }
   }
 
   return (

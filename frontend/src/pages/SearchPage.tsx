@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ProductCard } from "@/components/product/ProductCard";
 import { useStore } from "@/app/store";
-import { getCategoryCounts } from "@/lib/utils";
+import * as api from "@/lib/api";
+import type { Product } from "@/lib/types";
 
 const prices = [
   { name: "$1 to $50", value: "1-50" },
@@ -16,14 +17,17 @@ const ratings = [4, 3, 2, 1];
 const sortOrders = ["newest", "lowest", "highest", "rating"];
 
 export function SearchPage() {
-  const { state } = useStore();
+  const { syncProducts } = useStore();
   const [params] = useSearchParams();
   const query = params.get("q") ?? "all";
   const category = params.get("category") ?? "all";
   const price = params.get("price") ?? "all";
   const rating = params.get("rating") ?? "all";
   const sort = params.get("sort") ?? "newest";
-  const categories = getCategoryCounts(state.products);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Array<{ category: string; count: number }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState("");
 
   function getFilterUrl(next: Record<string, string>) {
     const search = new URLSearchParams({
@@ -37,39 +41,42 @@ export function SearchPage() {
     return `/search?${search.toString()}`;
   }
 
-  const filteredProducts = useMemo(() => {
-    let products = [...state.products];
+  useEffect(() => {
+    let cancelled = false;
 
-    if (query !== "all" && query.trim() !== "") {
-      const lowered = query.toLowerCase();
-      products = products.filter(
-        (product) =>
-          product.name.toLowerCase().includes(lowered) ||
-          product.brand.toLowerCase().includes(lowered) ||
-          product.description.toLowerCase().includes(lowered),
+    async function load() {
+      setLoading(true);
+      const [productsResult, categoriesResult] = await Promise.all([
+        api.getProducts({
+          page: 1,
+          limit: 60,
+          q: query,
+          category,
+          price,
+          rating,
+          sort,
+        }),
+        api.getProductCategories(),
+      ]);
+      if (cancelled) return;
+
+      const nextProducts = productsResult.data?.items ?? [];
+      setProducts(nextProducts);
+      setCategories(categoriesResult.data ?? []);
+      syncProducts(nextProducts);
+      setSummary(
+        productsResult.success && productsResult.data
+          ? `${productsResult.data.meta.total} products found`
+          : productsResult.message,
       );
+      setLoading(false);
     }
 
-    if (category !== "all") {
-      products = products.filter((product) => product.category === category);
-    }
-
-    if (price !== "all") {
-      const [min, max] = price.split("-").map(Number);
-      products = products.filter((product) => product.price >= min && product.price <= max);
-    }
-
-    if (rating !== "all") {
-      products = products.filter((product) => product.rating >= Number(rating));
-    }
-
-    if (sort === "lowest") products.sort((a, b) => a.price - b.price);
-    if (sort === "highest") products.sort((a, b) => b.price - a.price);
-    if (sort === "rating") products.sort((a, b) => b.rating - a.rating);
-    if (sort === "newest") products.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-
-    return products;
-  }, [category, price, query, rating, sort, state.products]);
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [category, price, query, rating, sort]);
 
   return (
     <div className="grid gap-8 md:grid-cols-5">
@@ -118,6 +125,7 @@ export function SearchPage() {
             {category !== "all" && `Category: ${category} `}
             {price !== "all" && `Price: ${price} `}
             {rating !== "all" && `Rating: ${rating}+ `}
+            {summary && <span className="ml-2">{summary}</span>}
           </div>
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span>Sort by</span>
@@ -133,9 +141,11 @@ export function SearchPage() {
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          {filteredProducts.map((product) => (
-            <ProductCard key={product.id} product={product} />
-          ))}
+          {loading ? (
+            <div className="rounded-2xl border p-4 text-sm text-muted-foreground">Loading products...</div>
+          ) : (
+            products.map((product) => <ProductCard key={product.id} product={product} />)
+          )}
         </div>
       </section>
     </div>

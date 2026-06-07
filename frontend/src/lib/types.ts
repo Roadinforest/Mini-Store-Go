@@ -45,6 +45,16 @@ export type Review = {
   description: string;
   isVerifiedPurchase: boolean;
   createdAt: string;
+  user?: {
+    id: string;
+    name: string;
+  };
+  product?: {
+    id: string;
+    name: string;
+    slug: string;
+    image?: string;
+  };
 };
 
 export type CartItem = {

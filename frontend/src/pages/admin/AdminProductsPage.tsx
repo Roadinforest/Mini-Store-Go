@@ -1,15 +1,33 @@
-import { FormEvent, useState } from "react";
-import { useStore } from "@/app/store";
+import { FormEvent, useEffect, useState } from "react";
 import { Button } from "@/components/common/Button";
+import * as api from "@/lib/api";
+import type { Product } from "@/lib/types";
 
 export function AdminProductsPage() {
-  const { state, deleteProduct, saveProduct } = useStore();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      const result = await api.getAdminProducts({ page: 1, limit: 100 });
+      if (cancelled) return;
+      setProducts(result.data?.items ?? []);
+      setLoading(false);
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    saveProduct({
+    const result = await api.createProduct({
       name: String(formData.get("name")),
       slug: String(formData.get("slug")),
       category: String(formData.get("category")),
@@ -21,8 +39,19 @@ export function AdminProductsPage() {
       isFeatured: Boolean(formData.get("isFeatured")),
       banner: String(formData.get("banner")) || null,
     });
-    setMessage("Product saved.");
-    event.currentTarget.reset();
+    setMessage(result.message);
+    if (result.success && result.data) {
+      setProducts((current) => [result.data!, ...current]);
+      event.currentTarget.reset();
+    }
+  }
+
+  async function onDelete(productId: string) {
+    const result = await api.deleteProduct(productId);
+    setMessage(result.message);
+    if (result.success) {
+      setProducts((current) => current.filter((product) => product.id !== productId));
+    }
   }
 
   return (
@@ -40,18 +69,26 @@ export function AdminProductsPage() {
               </tr>
             </thead>
             <tbody>
-              {state.products.map((product) => (
+              {loading ? (
+                <tr>
+                  <td className="p-4 text-muted-foreground" colSpan={4}>
+                    Loading products...
+                  </td>
+                </tr>
+              ) : (
+                products.map((product) => (
                 <tr key={product.id} className="border-t">
                   <td className="p-4">{product.name}</td>
                   <td className="p-4">{product.stock}</td>
                   <td className="p-4">${product.price.toFixed(2)}</td>
                   <td className="p-4">
-                    <Button variant="outline" onClick={() => deleteProduct(product.id)}>
+                    <Button variant="outline" onClick={() => void onDelete(product.id)}>
                       Delete
                     </Button>
                   </td>
                 </tr>
-              ))}
+                ))
+              )}
             </tbody>
           </table>
         </div>

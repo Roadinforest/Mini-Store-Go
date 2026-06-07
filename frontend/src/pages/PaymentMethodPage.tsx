@@ -1,4 +1,4 @@
-import { FormEvent } from "react";
+import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "@/app/store";
 import { Button } from "@/components/common/Button";
@@ -7,12 +7,16 @@ import { PAYMENT_METHODS } from "@/lib/utils";
 export function PaymentMethodPage() {
   const navigate = useNavigate();
   const { currentUser, setPaymentMethod } = useStore();
+  const [message, setMessage] = useState("");
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    setPaymentMethod(String(formData.get("paymentMethod")));
-    navigate("/place-order");
+    const result = await setPaymentMethod(String(formData.get("paymentMethod")));
+    setMessage(result.message);
+    if (result.success) {
+      navigate("/place-order");
+    }
   }
 
   return (
@@ -32,6 +36,7 @@ export function PaymentMethodPage() {
         ))}
         <Button type="submit">Continue</Button>
       </form>
+      {message && <div className="mt-4 text-sm text-muted-foreground">{message}</div>}
     </div>
   );
 }
