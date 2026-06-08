@@ -5,18 +5,24 @@ import { formatCurrency } from "@/lib/utils";
 
 export function ProductCard({ product }: { product: Product }) {
   return (
-    <Link to={`/product/${product.slug}`} className="overflow-hidden rounded-2xl border bg-card transition hover:-translate-y-1 hover:shadow-lg">
-      <img src={product.images[0]} alt={product.name} className="aspect-square w-full object-cover" />
-      <div className="grid gap-3 p-4">
-        <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{product.brand}</div>
-        <div className="font-semibold">{product.name}</div>
-        <div className="flex-between gap-3">
-          <Rating value={product.rating} />
-          <div className={product.stock > 0 ? "font-semibold" : "font-semibold text-red-600"}>
-            {product.stock > 0 ? formatCurrency(product.price) : "Out Of Stock"}
+    <div className="w-full max-w-sm rounded-lg border bg-card">
+      <Link to={`/product/${product.slug}`}>
+        <div className="flex items-center justify-center p-0">
+          <img src={product.images[0]} alt={product.name} className="h-[300px] w-[300px] object-cover" />
+        </div>
+        <div className="grid gap-4 p-4">
+          <div className="text-xs">{product.brand}</div>
+          <h2 className="text-sm font-medium">{product.name}</h2>
+          <div className="flex-between gap-4">
+            <Rating value={product.rating} />
+            {product.stock > 0 ? (
+              <div>{formatCurrency(product.price)}</div>
+            ) : (
+              <p className="text-destructive">Out Of Stock</p>
+            )}
           </div>
         </div>
-      </div>
-    </Link>
+      </Link>
+    </div>
   );
 }

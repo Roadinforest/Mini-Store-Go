@@ -11,6 +11,7 @@ export function ProductPage() {
   const { slug } = useParams();
   const { currentUser, addToCart, syncProducts, syncReviews } = useStore();
   const [imageIndex, setImageIndex] = useState(0);
+  const [brokenImages, setBrokenImages] = useState<string[]>([]);
   const [message, setMessage] = useState("");
   const [product, setProduct] = useState<Product | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -33,6 +34,8 @@ export function ProductPage() {
       }
 
       setProduct(productResult.data);
+      setImageIndex(0);
+      setBrokenImages([]);
       syncProducts([productResult.data]);
 
       const reviewsResult = await api.getProductReviews(productResult.data.id);
@@ -55,6 +58,26 @@ export function ProductPage() {
 
   if (!product) {
     return <div>Product not found.</div>;
+  }
+
+  const availableImages = product.images.filter((image) => !brokenImages.includes(image));
+  const activeImage = product.images[imageIndex];
+  const displayImage = brokenImages.includes(activeImage)
+    ? availableImages[0] ?? activeImage
+    : activeImage;
+  const productImages = product.images;
+
+  function markImageBroken(image: string) {
+    setBrokenImages((current) => (current.includes(image) ? current : [...current, image]));
+  }
+
+  function handleMainImageError() {
+    if (!displayImage) return;
+    markImageBroken(displayImage);
+    const nextIndex = productImages.findIndex((image) => image !== displayImage && !brokenImages.includes(image));
+    if (nextIndex >= 0) {
+      setImageIndex(nextIndex);
+    }
   }
 
   async function submitReview(event: FormEvent<HTMLFormElement>) {
@@ -89,26 +112,51 @@ export function ProductPage() {
     <div className="space-y-10">
       <section className="grid gap-8 md:grid-cols-5">
         <div className="md:col-span-2">
-          <img src={product.images[imageIndex]} alt={product.name} className="w-full rounded-3xl border object-cover" />
+          {displayImage ? (
+            <img
+              src={displayImage}
+              alt={product.name}
+              className="w-full object-cover"
+              onError={handleMainImageError}
+            />
+          ) : (
+            <div className="flex h-[320px] items-center justify-center border text-sm text-muted-foreground">
+              Image unavailable
+            </div>
+          )}
           <div className="mt-4 flex gap-3">
             {product.images.map((image, index) => (
-              <button key={image} onClick={() => setImageIndex(index)} className="overflow-hidden rounded-xl border">
-                <img src={image} alt={`${product.name} ${index + 1}`} className="h-20 w-20 object-cover" />
+              <button key={`${image}-${index}`} onClick={() => setImageIndex(index)} className="overflow-hidden rounded-xl border">
+                {brokenImages.includes(image) ? (
+                  <div className="flex h-20 w-20 items-center justify-center bg-muted px-2 text-center text-[11px] text-muted-foreground">
+                    Unavailable
+                  </div>
+                ) : (
+                  <img
+                    src={image}
+                    alt={`${product.name} ${index + 1}`}
+                    className="h-20 w-20 object-cover"
+                    onError={() => markImageBroken(image)}
+                  />
+                )}
               </button>
             ))}
           </div>
         </div>
         <div className="space-y-5 md:col-span-2">
-          <div className="text-sm uppercase tracking-[0.2em] text-muted-foreground">
-            {product.brand} · {product.category}
-          </div>
-          <h1 className="h1-bold">{product.name}</h1>
+          <p>
+            {product.brand} {product.category}
+          </p>
+          <h1 className="h3-bold">{product.name}</h1>
           <Rating value={product.rating} />
           <p className="text-sm text-muted-foreground">{product.numReviews} reviews</p>
           <div className="inline-flex rounded-full bg-green-100 px-5 py-2 font-semibold text-green-700">
             {formatCurrency(product.price)}
           </div>
-          <p className="leading-7 text-muted-foreground">{product.description}</p>
+          <div className="mt-10">
+            <p className="font-semibold">Description</p>
+            <p>{product.description}</p>
+          </div>
         </div>
         <div className="rounded-3xl border p-5">
           <div className="flex-between py-3 text-sm">

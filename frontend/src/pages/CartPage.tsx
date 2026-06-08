@@ -21,7 +21,7 @@ export function CartPage() {
   return (
     <div className="grid gap-5 md:grid-cols-4">
       <div className="overflow-x-auto md:col-span-3">
-        <table className="w-full border-separate border-spacing-y-3">
+        <table className="w-full">
           <thead>
             <tr className="text-left text-sm text-muted-foreground">
               <th>Item</th>
@@ -31,14 +31,14 @@ export function CartPage() {
           </thead>
           <tbody>
             {cart.items.map((item) => (
-              <tr key={item.productId} className="rounded-2xl border bg-white">
-                <td className="rounded-l-2xl border-y border-l p-3">
+              <tr key={item.productId} className="border-t">
+                <td className="p-3">
                   <Link to={`/product/${item.slug}`} className="flex items-center gap-3">
                     <img src={item.image} alt={item.name} className="h-14 w-14 rounded-md object-cover" />
                     <span>{item.name}</span>
                   </Link>
                 </td>
-                <td className="border-y p-3">
+                <td className="p-3">
                   <div className="flex-center gap-3">
                     <Button variant="outline" onClick={async () => setMessage((await removeFromCart(item.productId)).message)}>
                       -
@@ -49,7 +49,7 @@ export function CartPage() {
                     </Button>
                   </div>
                 </td>
-                <td className="rounded-r-2xl border-y border-r p-3 text-right font-semibold">
+                <td className="p-3 text-right font-semibold">
                   {formatCurrency(item.price)}
                 </td>
               </tr>

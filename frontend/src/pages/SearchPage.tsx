@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ProductCard } from "@/components/product/ProductCard";
 import { useStore } from "@/app/store";
+import { Button } from "@/components/common/Button";
 import * as api from "@/lib/api";
 import type { Product } from "@/lib/types";
 
@@ -79,70 +80,96 @@ export function SearchPage() {
   }, [category, price, query, rating, sort]);
 
   return (
-    <div className="grid gap-8 md:grid-cols-5">
-      <aside className="space-y-8">
+    <div className="grid md:grid-cols-5 md:gap-5">
+      <aside className="filter-links">
         <div>
-          <h3 className="mb-3 text-lg font-semibold">Department</h3>
-          <div className="space-y-2 text-sm">
-            <Link to={getFilterUrl({ category: "all" })}>Any</Link>
-            {categories.map((item) => (
-              <div key={item.category}>
-                <Link to={getFilterUrl({ category: item.category })}>{item.category}</Link>
-              </div>
-            ))}
+          <div className="mb-2 mt-3 text-xl">Department</div>
+          <div>
+            <ul className="space-y-1">
+              <li>
+                <Link className={(category === "all" || category === "") ? "font-bold" : ""} to={getFilterUrl({ category: "all" })}>Any</Link>
+              </li>
+              {categories.map((item) => (
+                <li key={item.category}>
+                  <Link className={category === item.category ? "font-bold" : ""} to={getFilterUrl({ category: item.category })}>
+                    {item.category}
+                  </Link>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
 
         <div>
-          <h3 className="mb-3 text-lg font-semibold">Price</h3>
-          <div className="space-y-2 text-sm">
-            <Link to={getFilterUrl({ price: "all" })}>Any</Link>
-            {prices.map((item) => (
-              <div key={item.value}>
-                <Link to={getFilterUrl({ price: item.value })}>{item.name}</Link>
-              </div>
-            ))}
+          <div className="mb-2 mt-8 text-xl">Price</div>
+          <div>
+            <ul className="space-y-1">
+              <li>
+                <Link className={price === "all" ? "font-bold" : ""} to={getFilterUrl({ price: "all" })}>Any</Link>
+              </li>
+              {prices.map((item) => (
+                <li key={item.value}>
+                  <Link className={price === item.value ? "font-bold" : ""} to={getFilterUrl({ price: item.value })}>
+                    {item.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
 
         <div>
-          <h3 className="mb-3 text-lg font-semibold">Customer Ratings</h3>
-          <div className="space-y-2 text-sm">
-            <Link to={getFilterUrl({ rating: "all" })}>Any</Link>
-            {ratings.map((item) => (
-              <div key={item}>
-                <Link to={getFilterUrl({ rating: String(item) })}>{item} stars & up</Link>
-              </div>
-            ))}
+          <div className="mb-2 mt-8 text-xl">Customer Ratings</div>
+          <div>
+            <ul className="space-y-1">
+              <li>
+                <Link className={rating === "all" ? "font-bold" : ""} to={getFilterUrl({ rating: "all" })}>Any</Link>
+              </li>
+              {ratings.map((item) => (
+                <li key={item}>
+                  <Link className={rating === String(item) ? "font-bold" : ""} to={getFilterUrl({ rating: String(item) })}>
+                    {item} stars & up
+                  </Link>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       </aside>
 
       <section className="space-y-4 md:col-span-4">
-        <div className="flex flex-col gap-4 rounded-2xl border p-4 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm text-muted-foreground">
-            {query !== "all" && `Query: ${query} `}
-            {category !== "all" && `Category: ${category} `}
-            {price !== "all" && `Price: ${price} `}
-            {rating !== "all" && `Rating: ${rating}+ `}
-            {summary && <span className="ml-2">{summary}</span>}
+        <div className="my-4 flex-between flex-col md:flex-row">
+          <div className="flex items-center">
+            <p>
+              {query !== "all" && query !== "" && `Query: ${query}`}
+              {category !== "all" && category !== "" && `Category: ${category}`}
+              {price !== "all" && ` Price: ${price}`}
+              {rating !== "all" && ` Rating: ${rating} stars & up`}
+              &nbsp;
+            </p>
+            {(query !== "all" && query !== "") || (category !== "all" && category !== "") || rating !== "all" || price !== "all" ? (
+              <div>
+                <Button variant="outline" asChild to="/search">
+                  Clear
+                </Button>
+              </div>
+            ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <span>Sort by</span>
+          <div>
+            Sort by{" "}
             {sortOrders.map((item) => (
-              <Link key={item} to={getFilterUrl({ sort: item })} className="font-medium">
+              <Link key={item} to={getFilterUrl({ sort: item })} className={`mx-2 ${sort === item ? "font-bold" : ""}`}>
                 {item}
               </Link>
             ))}
-            <Link to="/search" className="font-medium text-primary">
-              Clear
-            </Link>
           </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {loading ? (
             <div className="rounded-2xl border p-4 text-sm text-muted-foreground">Loading products...</div>
+          ) : products.length === 0 ? (
+            <div>No products found</div>
           ) : (
             products.map((product) => <ProductCard key={product.id} product={product} />)
           )}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useStore } from "@/app/store";
 import { Button } from "@/components/common/Button";
 import * as api from "@/lib/api";
@@ -60,21 +60,35 @@ export function OrderDetailsPage() {
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
         <section className="rounded-3xl border p-5">
-          <h1 className="h2-bold mb-4">Order {currentOrder.id.slice(0, 8)}</h1>
-          <div className="text-sm text-muted-foreground">Created at {formatDate(currentOrder.createdAt)}</div>
+          <h1 className="h2-bold mb-4">Order Details</h1>
+          <div className="text-sm text-muted-foreground">Order ID: {currentOrder.id}</div>
+          <div className="mt-3 text-sm text-muted-foreground">Created at {formatDate(currentOrder.createdAt)}</div>
         </section>
         <section className="rounded-3xl border p-5">
           <h2 className="mb-3 text-lg font-semibold">Items</h2>
-          <div className="space-y-3">
-            {currentOrder.orderitems.map((item) => (
-              <div key={item.productId} className="flex-between text-sm">
-                <span>
-                  {item.name} x {item.qty}
-                </span>
-                <span>{formatCurrency(item.qty * item.price)}</span>
-              </div>
-            ))}
-          </div>
+          <table className="w-full">
+            <thead>
+              <tr>
+                <th className="pb-3 text-left">Item</th>
+                <th className="pb-3 text-left">Quantity</th>
+                <th className="pb-3 text-right">Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentOrder.orderitems.map((item) => (
+                <tr key={item.productId} className="border-t">
+                  <td className="py-3">
+                    <Link to={`/product/${item.slug}`} className="flex items-center gap-3">
+                      <img src={item.image} alt={item.name} className="h-12 w-12 object-cover" />
+                      <span>{item.name}</span>
+                    </Link>
+                  </td>
+                  <td className="py-3">{item.qty}</td>
+                  <td className="py-3 text-right">{formatCurrency(item.price)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       </div>
 

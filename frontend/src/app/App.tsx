@@ -17,6 +17,7 @@ import { SearchPage } from "@/pages/SearchPage";
 import { ShippingAddressPage } from "@/pages/ShippingAddressPage";
 import { SignInPage } from "@/pages/SignInPage";
 import { SignUpPage } from "@/pages/SignUpPage";
+import { UnauthorizedPage } from "@/pages/UnauthorizedPage";
 import { UserOrdersPage } from "@/pages/user/UserOrdersPage";
 import { UserProfilePage } from "@/pages/user/UserProfilePage";
 
@@ -38,7 +39,7 @@ function RequireAdmin({ children }: { children: ReactElement }) {
     return <div className="wrapper py-10 text-sm text-muted-foreground">Checking session...</div>;
   }
   if (!currentUser) return <Navigate to="/sign-in" replace state={{ from: "/admin/overview" }} />;
-  if (currentUser.role !== "admin") return <Navigate to="/" replace />;
+  if (currentUser.role !== "admin") return <Navigate to="/unauthorized" replace />;
   return children;
 }
 
@@ -132,6 +133,7 @@ function AppRoutes() {
             </RequireAdmin>
           }
         />
+        <Route path="/unauthorized" element={<UnauthorizedPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
