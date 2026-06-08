@@ -1,6 +1,7 @@
-import { EllipsisVertical, MenuIcon, SearchIcon, ShoppingCart, Sun, UserIcon } from "lucide-react";
+import { EllipsisVertical, MenuIcon, SearchIcon, ShoppingCart, UserIcon } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ModeToggle } from "@/components/layout/ModeToggle";
 import { useStore } from "@/app/store";
 import * as api from "@/lib/api";
 import { APP_NAME } from "@/lib/utils";
@@ -102,7 +103,7 @@ export function Header() {
             <MenuIcon className="size-4" />
           </button>
           {categoryMenuOpen && (
-            <div className="absolute left-5 top-20 z-30 h-full max-h-[70vh] w-full max-w-sm overflow-auto rounded-2xl border bg-white p-4 shadow-xl">
+            <div className="absolute left-5 top-20 z-30 h-full max-h-[70vh] w-full max-w-sm overflow-auto rounded-2xl border bg-popover p-4 text-popover-foreground shadow-xl">
               <div className="text-lg font-semibold">Select a category</div>
               <div className="mt-4 space-y-1">
                 {categories.map((item) => (
@@ -162,13 +163,7 @@ export function Header() {
 
         <div className="flex justify-end gap-3">
           <nav className="hidden w-full max-w-xs gap-1 md:flex">
-            <button
-              type="button"
-              className="inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground"
-              aria-label="Theme"
-            >
-              <Sun className="size-4" />
-            </button>
+            <ModeToggle />
             <Link
               to="/cart"
               className="inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground"
@@ -195,7 +190,7 @@ export function Header() {
                     {firstInitial}
                   </button>
                   {userMenuOpen && (
-                    <div className="absolute right-0 top-12 z-30 w-56 rounded-md border bg-white p-1 shadow-md">
+                    <div className="absolute right-0 top-12 z-30 w-56 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
                       <div className="px-2 py-1.5">
                         <div className="text-sm font-medium leading-none">{currentUser.name}</div>
                         <div className="text-sm leading-none text-muted-foreground mt-1">{currentUser.email}</div>
@@ -236,13 +231,8 @@ export function Header() {
             </button>
 
             {mobileMenuOpen && (
-              <div className="absolute right-5 top-20 z-30 flex w-56 flex-col items-start rounded-2xl border bg-white p-4 shadow-xl">
-                <button
-                  type="button"
-                  className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm hover:bg-accent"
-                >
-                  <Sun className="size-4" />
-                </button>
+              <div className="absolute right-5 top-20 z-30 flex w-56 flex-col items-start rounded-2xl border bg-popover p-4 text-popover-foreground shadow-xl">
+                <ModeToggle />
                 <Link to="/cart" className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm hover:bg-accent" onClick={() => setMobileMenuOpen(false)}>
                   <ShoppingCart className="size-4" /> Cart
                 </Link>
