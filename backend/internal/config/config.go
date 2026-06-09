@@ -16,6 +16,8 @@ type Config struct {
 	Redis    RedisConfig    `mapstructure:"redis"`
 	Log      LogConfig      `mapstructure:"log"`
 	CORS     CORSConfig     `mapstructure:"cors"`
+	Upload   UploadConfig   `mapstructure:"upload"`
+	AI       AIConfig       `mapstructure:"ai"`
 }
 
 type AppConfig struct {
@@ -72,6 +74,25 @@ type CORSConfig struct {
 	ExposedHeaders   []string      `mapstructure:"exposed_headers"`
 	AllowCredentials bool          `mapstructure:"allow_credentials"`
 	MaxAge           time.Duration `mapstructure:"max_age"`
+}
+
+type UploadConfig struct {
+	StorageDir       string   `mapstructure:"storage_dir"`
+	PublicBasePath   string   `mapstructure:"public_base_path"`
+	MaxFileSize      int64    `mapstructure:"max_file_size"`
+	AllowedMimeTypes []string `mapstructure:"allowed_mime_types"`
+}
+
+type AIConfig struct {
+	Enabled            bool          `mapstructure:"enabled"`
+	Provider           string        `mapstructure:"provider"`
+	APIKey             string        `mapstructure:"api_key"`
+	BaseURL            string        `mapstructure:"base_url"`
+	Model              string        `mapstructure:"model"`
+	SystemPrompt       string        `mapstructure:"system_prompt"`
+	Timeout            time.Duration `mapstructure:"timeout"`
+	MaxContextProducts int           `mapstructure:"max_context_products"`
+	Temperature        float32       `mapstructure:"temperature"`
 }
 
 func Load() (*Config, error) {
@@ -144,6 +165,21 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cors.exposed_headers", []string{"X-Request-Id"})
 	v.SetDefault("cors.allow_credentials", true)
 	v.SetDefault("cors.max_age", "12h")
+
+	v.SetDefault("upload.storage_dir", "./storage/uploads")
+	v.SetDefault("upload.public_base_path", "/uploads")
+	v.SetDefault("upload.max_file_size", 4<<20)
+	v.SetDefault("upload.allowed_mime_types", []string{"image/jpeg", "image/png", "image/webp", "image/gif"})
+
+	v.SetDefault("ai.enabled", false)
+	v.SetDefault("ai.provider", "openai")
+	v.SetDefault("ai.api_key", "")
+	v.SetDefault("ai.base_url", "")
+	v.SetDefault("ai.model", "")
+	v.SetDefault("ai.system_prompt", "You are the Mini Store shopping assistant. Use the provided product context when it is relevant, keep recommendations grounded in available catalog data, and be explicit when you are making a best-effort inference.")
+	v.SetDefault("ai.timeout", "60s")
+	v.SetDefault("ai.max_context_products", 5)
+	v.SetDefault("ai.temperature", 0.3)
 }
 
 func errorAs(err error, target *viper.ConfigFileNotFoundError) bool {

@@ -46,7 +46,10 @@ func Run(ctx context.Context) error {
 	}
 	defer closeRedis(redisClient, log)
 
-	engine := router.New(cfg, log, db, redisClient)
+	engine, err := router.New(cfg, log, db, redisClient)
+	if err != nil {
+		return err
+	}
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.App.Host, cfg.App.Port),
 		Handler:      engine,
