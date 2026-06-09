@@ -1,4 +1,4 @@
-import { EllipsisVertical, MenuIcon, SearchIcon, ShoppingCart, UserIcon } from "lucide-react";
+import { ChevronDown, EllipsisVertical, MenuIcon, SearchIcon, ShoppingCart, UserIcon } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ModeToggle } from "@/components/layout/ModeToggle";
@@ -18,10 +18,12 @@ export function Header() {
   const [category, setCategory] = useState("all");
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchCategoryOpen, setSearchCategoryOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
-  const categoryMenuRef = useRef<HTMLDivElement | null>(null);
+  const sidebarRef = useRef<HTMLDivElement | null>(null);
+  const searchCategoryRef = useRef<HTMLDivElement | null>(null);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -47,22 +49,25 @@ export function Header() {
       if (!userMenuRef.current?.contains(target)) {
         setUserMenuOpen(false);
       }
-      if (!categoryMenuRef.current?.contains(target)) {
-        setCategoryMenuOpen(false);
+      if (!sidebarRef.current?.contains(target)) {
+        setSidebarOpen(false);
+      }
+      if (!searchCategoryRef.current?.contains(target)) {
+        setSearchCategoryOpen(false);
       }
       if (!mobileMenuRef.current?.contains(target)) {
         setMobileMenuOpen(false);
       }
     }
 
-    if (userMenuOpen || categoryMenuOpen || mobileMenuOpen) {
+    if (userMenuOpen || sidebarOpen || searchCategoryOpen || mobileMenuOpen) {
       document.addEventListener("mousedown", onPointerDown);
     }
 
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
     };
-  }, [categoryMenuOpen, mobileMenuOpen, userMenuOpen]);
+  }, [mobileMenuOpen, searchCategoryOpen, sidebarOpen, userMenuOpen]);
 
   const cartCount = useMemo(
     () => state.cart.items.reduce((sum, item) => sum + item.qty, 0),
@@ -93,34 +98,42 @@ export function Header() {
   return (
     <header className="w-full border-b">
       <div className="wrapper flex-between">
-        <div className="flex-start" ref={categoryMenuRef}>
+        <div className="flex-start" ref={sidebarRef}>
           <button
             type="button"
-            className="inline-flex size-9 items-center justify-center gap-2 whitespace-nowrap rounded-md border bg-background px-3 text-sm font-medium shadow-xs transition-all hover:bg-accent hover:text-accent-foreground"
+            className="inline-flex size-10 items-center justify-center gap-2 whitespace-nowrap rounded-md border bg-background px-3 text-sm font-medium shadow-xs transition-all hover:bg-accent hover:text-accent-foreground"
             aria-label="Open categories"
-            onClick={() => setCategoryMenuOpen((current) => !current)}
+            onClick={() => setSidebarOpen(true)}
           >
             <MenuIcon className="size-4" />
           </button>
-          {categoryMenuOpen && (
-            <div className="absolute left-5 top-20 z-30 h-full max-h-[70vh] w-full max-w-sm overflow-auto rounded-2xl border bg-popover p-4 text-popover-foreground shadow-xl">
-              <div className="text-lg font-semibold">Select a category</div>
-              <div className="mt-4 space-y-1">
-                {categories.map((item) => (
-                  <button
-                    key={item.category}
-                    type="button"
-                    className="flex w-full items-center justify-start gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent"
-                    onClick={() => {
-                      setCategoryMenuOpen(false);
-                      navigate(`/search?category=${encodeURIComponent(item.category)}`);
-                    }}
-                  >
-                    {item.category} ({item.count})
-                  </button>
-                ))}
+          {sidebarOpen && (
+            <>
+              <button
+                type="button"
+                aria-label="Close categories"
+                className="fixed inset-0 z-20 bg-black/30"
+                onClick={() => setSidebarOpen(false)}
+              />
+              <div className="fixed inset-y-0 left-0 z-30 w-full max-w-sm border-r bg-popover p-6 text-popover-foreground shadow-xl">
+                <div className="text-lg font-semibold">Select a category</div>
+                <div className="mt-4 space-y-1">
+                  {categories.map((item) => (
+                    <button
+                      key={item.category}
+                      type="button"
+                      className="flex w-full items-center justify-start gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent"
+                      onClick={() => {
+                        setSidebarOpen(false);
+                        navigate(`/search?category=${encodeURIComponent(item.category)}`);
+                      }}
+                    >
+                      {item.category} ({item.count})
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            </>
           )}
           <Link to="/" className="flex-start ml-4">
             <img src="/images/logo.svg" alt={`${APP_NAME} logo`} className="h-12 w-12" />
@@ -131,19 +144,44 @@ export function Header() {
         <div className="hidden md:block">
           <form onSubmit={onSearchSubmit}>
             <div className="flex w-full max-w-sm items-center space-x-2">
-              <select
-                value={category}
-                onChange={(event) => setCategory(event.target.value)}
-                className="h-9 w-[180px] rounded-md border bg-background px-3 text-sm shadow-xs outline-none"
-                aria-label="Category"
-              >
-                <option value="all">All</option>
-                {categories.map((item) => (
-                  <option key={item.category} value={item.category}>
-                    {item.category}
-                  </option>
-                ))}
-              </select>
+              <div className="relative" ref={searchCategoryRef}>
+                <button
+                  type="button"
+                  className="inline-flex h-9 w-[180px] items-center justify-between rounded-md border bg-background px-3 text-sm shadow-xs outline-none"
+                  aria-label="Category"
+                  onClick={() => setSearchCategoryOpen((current) => !current)}
+                >
+                  <span className="truncate">{category === "all" ? "All" : category}</span>
+                  <ChevronDown className="size-4 text-muted-foreground" />
+                </button>
+                {searchCategoryOpen && (
+                  <div className="absolute left-0 top-11 z-30 w-[280px] rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+                    <button
+                      type="button"
+                      className={`flex h-[30px] w-full items-center rounded-sm px-2 text-left text-sm hover:bg-accent ${category === "all" ? "bg-accent" : ""}`}
+                      onClick={() => {
+                        setCategory("all");
+                        setSearchCategoryOpen(false);
+                      }}
+                    >
+                      All
+                    </button>
+                    {categories.map((item) => (
+                      <button
+                        key={item.category}
+                        type="button"
+                        className={`flex h-[30px] w-full items-center rounded-sm px-2 text-left text-sm hover:bg-accent ${category === item.category ? "bg-accent" : ""}`}
+                        onClick={() => {
+                          setCategory(item.category);
+                          setSearchCategoryOpen(false);
+                        }}
+                      >
+                        {item.category}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <input
                 className="h-9 md:w-[100px] lg:w-[300px] rounded-md border bg-transparent px-3 py-1 text-base shadow-xs outline-none"
                 placeholder="Search..."
