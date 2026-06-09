@@ -2,4 +2,6 @@
 .env.local
 tmp
 bin
+storage
+coverage.out
 configs/config.yaml

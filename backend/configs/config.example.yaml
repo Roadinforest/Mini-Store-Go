@@ -62,3 +62,27 @@ cors:
     - X-Request-Id
   allow_credentials: true
   max_age: 12h
+
+upload:
+  storage_dir: ./storage/uploads
+  public_base_path: /uploads
+  max_file_size: 4194304
+  allowed_mime_types:
+    - image/jpeg
+    - image/png
+    - image/webp
+    - image/gif
+
+ai:
+  enabled: false
+  provider: openai
+  api_key: ""
+  base_url: ""
+  model: ""
+  system_prompt: >
+    You are the Mini Store shopping assistant. Use the provided product context
+    when it is relevant, keep recommendations grounded in available catalog
+    data, and be explicit when you are making a best-effort inference.
+  timeout: 60s
+  max_context_products: 5
+  temperature: 0.3
