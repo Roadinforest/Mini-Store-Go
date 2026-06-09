@@ -1,3 +1,4 @@
+import { ChatWidget } from "@/components/chat/ChatWidget";
 import { Outlet, useLocation } from "react-router-dom";
 import { Footer } from "@/components/layout/Footer";
 import { Header } from "@/components/layout/Header";
@@ -33,6 +34,7 @@ export function AppShell() {
       <main className={isAdmin || isUser ? "container mx-auto flex-1 space-y-4 p-8 pt-6" : "wrapper py-8"}>
         <Outlet />
       </main>
+      <ChatWidget />
       <Footer />
     </div>
   );

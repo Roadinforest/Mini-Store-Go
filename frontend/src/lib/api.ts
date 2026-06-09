@@ -2,6 +2,22 @@ import type { AdminOverview, Cart, CartItem, Order, Product, ProductDraft, Revie
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080/api/v1";
 
+export type ChatMessage = {
+  role: "user" | "assistant" | "system";
+  content: string;
+  url?: string;
+  messageType?: "normal" | "tool_call";
+  toolName?: string;
+};
+
+export type ChatStreamChunk = {
+  type: "partial" | "complete" | "navigation" | "error" | "tool_call" | "thinking";
+  content?: string;
+  url?: string;
+  message?: string;
+  toolName?: string;
+};
+
 type ApiEnvelope<T> = {
   code: string;
   message: string;
@@ -155,6 +171,24 @@ export type ApiResult<T> = {
   data?: T;
   details?: unknown;
 };
+
+export async function sendChat(messages: ChatMessage[]): Promise<ApiResult<ChatMessage>> {
+  return request<ChatMessage>("/ai/chat", {
+    method: "POST",
+    body: JSON.stringify({ messages }),
+  });
+}
+
+export async function createChatStream(messages: ChatMessage[]): Promise<Response> {
+  return fetch(`${API_BASE_URL}/ai/chat/stream`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ messages }),
+  });
+}
 
 export async function signIn(payload: { email: string; password: string }): Promise<ApiResult<User>> {
   return request<User>("/auth/sign-in", {
