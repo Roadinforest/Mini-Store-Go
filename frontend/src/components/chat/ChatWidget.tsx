@@ -1,5 +1,5 @@
 import { MessageCircle, SendHorizontal, X } from "lucide-react";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { createChatStream, sendChat, type ChatMessage, type ChatStreamChunk } from "@/lib/api";
 
 const INITIAL_MESSAGES: ChatMessage[] = [
@@ -61,7 +61,13 @@ export function ChatWidget() {
             : [...current, { role: "assistant", content: "智能助手暂时不可用，请稍后再试。" }],
         );
       } else {
-        setMessages((current) => (placeholderAdded ? replaceLastAssistant(current, fallback.data!.content) : [...current, fallback.data!]));
+        const visibleFallback = {
+          ...fallback.data,
+          content: visibleAssistantContent(fallback.data.content),
+        };
+        setMessages((current) =>
+          placeholderAdded ? replaceLastAssistant(current, visibleFallback.content) : [...current, visibleFallback],
+        );
       }
     } finally {
       setIsLoading(false);
@@ -100,7 +106,7 @@ export function ChatWidget() {
                       : "rounded-bl-sm border bg-background text-foreground"
                   }`}
                 >
-                  {message.content || (isLoading && index === messages.length - 1 ? "正在思考..." : "")}
+                  <ChatMessageBody content={message.content || (isLoading && index === messages.length - 1 ? "正在思考..." : "")} />
                 </div>
               </div>
             ))}
@@ -158,6 +164,7 @@ async function consumeStream(
 
   const decoder = new TextDecoder();
   let buffer = "";
+  let rawAssistantContent = "";
 
   while (true) {
     const { done, value } = await reader.read();
@@ -177,7 +184,7 @@ async function consumeStream(
       if (payload === "[DONE]") continue;
 
       const data = JSON.parse(payload) as ChatStreamChunk;
-      applyStreamChunk(data, setMessages);
+      rawAssistantContent = applyStreamChunk(data, setMessages, rawAssistantContent);
     }
   }
 }
@@ -185,20 +192,35 @@ async function consumeStream(
 function applyStreamChunk(
   chunk: ChatStreamChunk,
   setMessages: (value: ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[])) => void,
+  rawAssistantContent: string,
 ) {
   if (chunk.type === "error") {
     setMessages((current) => replaceLastAssistant(current, chunk.content || "智能助手暂时不可用，请稍后再试。"));
-    return;
+    return rawAssistantContent;
   }
 
   if (chunk.type === "partial") {
-    setMessages((current) => appendToLastAssistant(current, chunk.content || ""));
-    return;
+    const nextRawContent = `${rawAssistantContent}${chunk.content || ""}`;
+    setMessages((current) => replaceLastAssistant(current, visibleAssistantContent(nextRawContent)));
+    return nextRawContent;
   }
 
-  if (chunk.type === "complete" || chunk.type === "thinking") {
-    setMessages((current) => replaceLastAssistant(current, chunk.content || ""));
+  if (chunk.type === "complete") {
+    const nextRawContent = chunk.content ?? rawAssistantContent;
+    setMessages((current) => replaceLastAssistant(current, visibleAssistantContent(nextRawContent)));
+    return nextRawContent;
   }
+
+  if (chunk.type === "navigation") {
+    const message = chunk.message || chunk.content || "正在跳转到产品页面...";
+    setMessages((current) => replaceLastAssistant(current, message));
+    if (chunk.url) {
+      window.location.href = chunk.url;
+    }
+    return rawAssistantContent;
+  }
+
+  return rawAssistantContent;
 }
 
 function replaceLastAssistant(messages: ChatMessage[], content: string) {
@@ -216,17 +238,257 @@ function replaceLastAssistant(messages: ChatMessage[], content: string) {
   return next;
 }
 
-function appendToLastAssistant(messages: ChatMessage[], content: string) {
-  const next = [...messages];
-  const lastIndex = next.length - 1;
-  if (lastIndex < 0 || next[lastIndex]?.role !== "assistant") {
-    next.push({ role: "assistant", content });
-    return next;
+function visibleAssistantContent(content: string) {
+  return content.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, "").trim();
+}
+
+function ChatMessageBody({ content }: { content: string }) {
+  const blocks = parseMarkdownBlocks(content);
+
+  if (blocks.length === 0) {
+    return null;
   }
 
-  next[lastIndex] = {
-    ...next[lastIndex],
-    content: `${next[lastIndex].content}${content}`,
-  };
-  return next;
+  return (
+    <div className="space-y-2">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          const HeadingTag = `h${block.level}` as const;
+          return (
+            <HeadingTag key={index} className="pt-1 text-sm font-semibold leading-6">
+              {renderInlineMarkdown(block.text)}
+            </HeadingTag>
+          );
+        }
+
+        if (block.type === "list") {
+          return (
+            <ul key={index} className="list-disc space-y-1 pl-5">
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
+              ))}
+            </ul>
+          );
+        }
+
+        if (block.type === "quote") {
+          return (
+            <blockquote key={index} className="border-l-2 border-border pl-3 text-muted-foreground">
+              {renderInlineMarkdown(block.text)}
+            </blockquote>
+          );
+        }
+
+        if (block.type === "table") {
+          return (
+            <div key={index} className="overflow-x-auto">
+              <table className="min-w-full border-collapse text-left text-xs">
+                <thead>
+                  <tr>
+                    {block.headers.map((header, headerIndex) => (
+                      <th key={headerIndex} className="border-b px-2 py-1 font-semibold">
+                        {renderInlineMarkdown(header)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {row.map((cell, cellIndex) => (
+                        <td key={cellIndex} className="border-b px-2 py-1 align-top">
+                          {renderInlineMarkdown(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+
+        if (block.type === "divider") {
+          return <hr key={index} className="border-border" />;
+        }
+
+        return (
+          <p key={index} className="whitespace-pre-wrap">
+            {renderInlineMarkdown(block.text)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+type MarkdownBlock =
+  | {
+      type: "paragraph";
+      text: string;
+    }
+  | {
+      type: "heading";
+      level: 1 | 2 | 3;
+      text: string;
+    }
+  | {
+      type: "list";
+      items: string[];
+    }
+  | {
+      type: "quote";
+      text: string;
+    }
+  | {
+      type: "table";
+      headers: string[];
+      rows: string[][];
+    }
+  | {
+      type: "divider";
+    };
+
+function parseMarkdownBlocks(content: string): MarkdownBlock[] {
+  const blocks: MarkdownBlock[] = [];
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  let paragraph: string[] = [];
+  let list: string[] = [];
+  let index = 0;
+
+  function flushParagraph() {
+    if (paragraph.length === 0) return;
+    blocks.push({ type: "paragraph", text: paragraph.join("\n").trim() });
+    paragraph = [];
+  }
+
+  function flushList() {
+    if (list.length === 0) return;
+    blocks.push({ type: "list", items: list });
+    list = [];
+  }
+
+  while (index < lines.length) {
+    const line = lines[index];
+
+    if (isMarkdownTableStart(lines, index)) {
+      flushParagraph();
+      flushList();
+      const headers = splitTableRow(line);
+      index += 2;
+      const rows: string[][] = [];
+      while (index < lines.length && isTableRow(lines[index])) {
+        rows.push(splitTableRow(lines[index]));
+        index++;
+      }
+      blocks.push({ type: "table", headers, rows });
+      continue;
+    }
+
+    const headingMatch = line.match(/^\s{0,3}(#{1,3})\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      flushList();
+      blocks.push({
+        type: "heading",
+        level: headingMatch[1].length as 1 | 2 | 3,
+        text: headingMatch[2].trim(),
+      });
+      index++;
+      continue;
+    }
+
+    if (/^\s{0,3}(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "divider" });
+      index++;
+      continue;
+    }
+
+    const quoteMatch = line.match(/^\s{0,3}>\s?(.+)$/);
+    if (quoteMatch) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "quote", text: quoteMatch[1].trim() });
+      index++;
+      continue;
+    }
+
+    const listMatch = line.match(/^\s*[-*]\s+(.+)$/);
+    if (listMatch) {
+      flushParagraph();
+      list.push(listMatch[1]);
+      index++;
+      continue;
+    }
+
+    if (line.trim() === "") {
+      flushParagraph();
+      flushList();
+      index++;
+      continue;
+    }
+
+    flushList();
+    paragraph.push(line);
+    index++;
+  }
+
+  flushParagraph();
+  flushList();
+  return blocks;
+}
+
+function isMarkdownTableStart(lines: string[], index: number) {
+  return isTableRow(lines[index]) && index + 1 < lines.length && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1]);
+}
+
+function isTableRow(line: string | undefined) {
+  return Boolean(line && line.includes("|") && line.trim().startsWith("|") && line.trim().endsWith("|"));
+}
+
+function splitTableRow(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+
+    const token = match[0];
+    if (token.startsWith("**")) {
+      nodes.push(
+        <strong key={nodes.length} className="font-semibold">
+          {token.slice(2, -2)}
+        </strong>,
+      );
+    } else {
+      nodes.push(
+        <code key={nodes.length} className="rounded bg-muted px-1 py-0.5 text-[0.85em]">
+          {token.slice(1, -1)}
+        </code>,
+      );
+    }
+
+    lastIndex = match.index + token.length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
 }

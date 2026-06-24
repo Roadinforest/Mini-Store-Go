@@ -8,7 +8,7 @@ export type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   url?: string;
-  messageType?: "normal" | "tool_call";
+  messageType?: "normal" | "tool_call" | "navigation";
   toolName?: string;
 };
 
