@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -100,6 +102,7 @@ func Load() (*Config, error) {
 	v.SetConfigName("config")
 	v.SetConfigType("yaml")
 	v.AddConfigPath("./configs")
+	v.AddConfigPath("./backend/configs")
 	v.AddConfigPath(".")
 
 	v.SetEnvPrefix("MINI_STORE")
@@ -119,8 +122,25 @@ func Load() (*Config, error) {
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
+	if err := applyRuntimeEnv(cfg); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
+}
+
+func applyRuntimeEnv(cfg *Config) error {
+	portValue := strings.TrimSpace(os.Getenv("PORT"))
+	if portValue == "" {
+		return nil
+	}
+
+	port, err := strconv.Atoi(portValue)
+	if err != nil || port <= 0 {
+		return fmt.Errorf("invalid PORT %q: must be a positive integer", portValue)
+	}
+	cfg.App.Port = port
+	return nil
 }
 
 func setDefaults(v *viper.Viper) {
