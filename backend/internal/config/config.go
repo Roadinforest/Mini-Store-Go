@@ -18,7 +18,6 @@ type Config struct {
 	Redis    RedisConfig    `mapstructure:"redis"`
 	Log      LogConfig      `mapstructure:"log"`
 	CORS     CORSConfig     `mapstructure:"cors"`
-	Upload   UploadConfig   `mapstructure:"upload"`
 	AI       AIConfig       `mapstructure:"ai"`
 }
 
@@ -76,13 +75,6 @@ type CORSConfig struct {
 	ExposedHeaders   []string      `mapstructure:"exposed_headers"`
 	AllowCredentials bool          `mapstructure:"allow_credentials"`
 	MaxAge           time.Duration `mapstructure:"max_age"`
-}
-
-type UploadConfig struct {
-	StorageDir       string   `mapstructure:"storage_dir"`
-	PublicBasePath   string   `mapstructure:"public_base_path"`
-	MaxFileSize      int64    `mapstructure:"max_file_size"`
-	AllowedMimeTypes []string `mapstructure:"allowed_mime_types"`
 }
 
 type AIConfig struct {
@@ -202,11 +194,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cors.exposed_headers", []string{"X-Request-Id"})
 	v.SetDefault("cors.allow_credentials", true)
 	v.SetDefault("cors.max_age", "12h")
-
-	v.SetDefault("upload.storage_dir", "./storage/uploads")
-	v.SetDefault("upload.public_base_path", "/uploads")
-	v.SetDefault("upload.max_file_size", 4<<20)
-	v.SetDefault("upload.allowed_mime_types", []string{"image/jpeg", "image/png", "image/webp", "image/gif"})
 
 	v.SetDefault("ai.enabled", false)
 	v.SetDefault("ai.provider", "openai")

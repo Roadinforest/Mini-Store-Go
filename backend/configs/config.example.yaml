@@ -63,16 +63,6 @@ cors:
   allow_credentials: true
   max_age: 12h
 
-upload:
-  storage_dir: ./storage/uploads
-  public_base_path: /uploads
-  max_file_size: 4194304
-  allowed_mime_types:
-    - image/jpeg
-    - image/png
-    - image/webp
-    - image/gif
-
 ai:
   enabled: false
   provider: openai
