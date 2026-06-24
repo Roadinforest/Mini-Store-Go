@@ -1,6 +1,8 @@
 import type { AdminOverview, Cart, CartItem, Order, Product, ProductDraft, Review, ShippingAddress, User } from "@/lib/types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080/api/v1";
+const API_BASE_URL = import.meta.env.DEV
+  ? (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080/api/v1")
+  : "/api/v1";
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
