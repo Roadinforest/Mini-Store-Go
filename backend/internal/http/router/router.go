@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -28,6 +29,10 @@ import (
 )
 
 func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Client) (*gin.Engine, error) {
+	if db == nil {
+		return nil, errors.New("database is required")
+	}
+
 	gin.SetMode(resolveGinMode(cfg.App.Env))
 
 	engine := gin.New()
