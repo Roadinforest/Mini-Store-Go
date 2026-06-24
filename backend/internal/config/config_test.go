@@ -23,6 +23,20 @@ database:
 	}
 }
 
+func TestLoadReadsDatabaseDSNFromEnvWithoutConfigFile(t *testing.T) {
+	tempDir := t.TempDir()
+	chdir(t, tempDir)
+	t.Setenv("MINI_STORE_DATABASE_DSN", "postgres://env-user:env-pass@localhost:5432/mini_store?sslmode=disable")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database.DSN != "postgres://env-user:env-pass@localhost:5432/mini_store?sslmode=disable" {
+		t.Fatalf("unexpected database dsn: %q", cfg.Database.DSN)
+	}
+}
+
 func TestLoadUsesPlatformPortEnv(t *testing.T) {
 	tempDir := t.TempDir()
 	writeConfig(t, tempDir, `

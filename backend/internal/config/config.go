@@ -166,6 +166,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.cookie_http_only", true)
 	v.SetDefault("auth.cookie_same_site", "lax")
 
+	v.SetDefault("database.dsn", "")
 	v.SetDefault("database.max_idle_conns", 10)
 	v.SetDefault("database.max_open_conns", 50)
 	v.SetDefault("database.conn_max_lifetime", "30m")
