@@ -18,6 +18,8 @@ auth:
   refresh_cookie_name: mini_store_refresh_token
   session_cart_cookie_name: session_cart_id
   cookie_domain: ""
+  # For a deployed frontend and API on different sites, set cookie_secure: true
+  # and cookie_same_site: none, or override with MINI_STORE_AUTH_COOKIE_* env vars.
   cookie_secure: false
   cookie_http_only: true
   cookie_same_site: lax

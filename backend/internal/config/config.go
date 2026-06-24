@@ -125,6 +125,19 @@ func applyRuntimeEnv(cfg *Config) error {
 	if origins := splitEnvList(os.Getenv("MINI_STORE_CORS_ALLOWED_ORIGINS")); len(origins) > 0 {
 		cfg.CORS.AllowedOrigins = origins
 	}
+	if domain := strings.TrimSpace(os.Getenv("MINI_STORE_AUTH_COOKIE_DOMAIN")); domain != "" {
+		cfg.Auth.CookieDomain = domain
+	}
+	if sameSite := strings.TrimSpace(os.Getenv("MINI_STORE_AUTH_COOKIE_SAME_SITE")); sameSite != "" {
+		cfg.Auth.CookieSameSite = strings.ToLower(sameSite)
+	}
+	if secure := strings.TrimSpace(os.Getenv("MINI_STORE_AUTH_COOKIE_SECURE")); secure != "" {
+		value, err := strconv.ParseBool(secure)
+		if err != nil {
+			return fmt.Errorf("invalid MINI_STORE_AUTH_COOKIE_SECURE %q: must be a boolean", secure)
+		}
+		cfg.Auth.CookieSecure = value
+	}
 
 	portValue := strings.TrimSpace(os.Getenv("PORT"))
 	if portValue == "" {

@@ -58,6 +58,45 @@ func TestLoadReadsCORSAllowedOriginsFromEnvWithoutConfigFile(t *testing.T) {
 	}
 }
 
+func TestLoadReadsAuthCookieSettingsFromEnv(t *testing.T) {
+	tempDir := t.TempDir()
+	writeConfig(t, tempDir, `
+auth:
+  cookie_domain: ""
+  cookie_secure: false
+  cookie_same_site: lax
+`)
+	chdir(t, tempDir)
+	t.Setenv("MINI_STORE_AUTH_COOKIE_DOMAIN", ".example.com")
+	t.Setenv("MINI_STORE_AUTH_COOKIE_SECURE", "true")
+	t.Setenv("MINI_STORE_AUTH_COOKIE_SAME_SITE", "none")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.CookieDomain != ".example.com" {
+		t.Fatalf("expected cookie domain from env, got %q", cfg.Auth.CookieDomain)
+	}
+	if !cfg.Auth.CookieSecure {
+		t.Fatal("expected secure cookies from env")
+	}
+	if cfg.Auth.CookieSameSite != "none" {
+		t.Fatalf("expected same site from env, got %q", cfg.Auth.CookieSameSite)
+	}
+}
+
+func TestLoadRejectsInvalidAuthCookieSecureEnv(t *testing.T) {
+	tempDir := t.TempDir()
+	chdir(t, tempDir)
+	t.Setenv("MINI_STORE_AUTH_COOKIE_SECURE", "definitely")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected invalid auth cookie secure env to return an error")
+	}
+}
+
 func TestLoadUsesPlatformPortEnv(t *testing.T) {
 	tempDir := t.TempDir()
 	writeConfig(t, tempDir, `
