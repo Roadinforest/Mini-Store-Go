@@ -172,6 +172,10 @@ export type ApiResult<T> = {
   details?: unknown;
 };
 
+type RequestOptions = {
+  skipAuthRefresh?: boolean;
+};
+
 export async function sendChat(messages: ChatMessage[]): Promise<ApiResult<ChatMessage>> {
   return request<ChatMessage>("/ai/chat", {
     method: "POST",
@@ -219,6 +223,12 @@ export async function getCurrentUser(): Promise<ApiResult<User>> {
   return request<User>("/auth/me", {
     method: "GET",
   });
+}
+
+export async function refreshAuth(): Promise<ApiResult<User>> {
+  return request<User>("/auth/refresh", {
+    method: "POST",
+  }, { skipAuthRefresh: true });
 }
 
 export async function updateProfile(payload: {
@@ -401,7 +411,7 @@ export async function markOrderDelivered(orderID: string): Promise<ApiResult<Ord
   return request<Order>(`/admin/orders/${orderID}/deliver`, { method: "PUT" });
 }
 
-async function request<T>(path: string, init: RequestInit): Promise<ApiResult<T>> {
+async function request<T>(path: string, init: RequestInit, options: RequestOptions = {}): Promise<ApiResult<T>> {
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
@@ -414,6 +424,13 @@ async function request<T>(path: string, init: RequestInit): Promise<ApiResult<T>
 
     const payload = (await response.json()) as ApiEnvelope<unknown>;
     if (!response.ok) {
+      if (response.status === 401 && shouldRefreshAuth(path, options)) {
+        const refreshResult = await refreshAuth();
+        if (refreshResult.success) {
+          return request<T>(path, init, { ...options, skipAuthRefresh: true });
+        }
+      }
+
       return {
         success: false,
         message: payload.message || "Request failed.",
@@ -432,6 +449,11 @@ async function request<T>(path: string, init: RequestInit): Promise<ApiResult<T>
       message: error instanceof Error ? error.message : "Network error.",
     };
   }
+}
+
+function shouldRefreshAuth(path: string, options: RequestOptions): boolean {
+  if (options.skipAuthRefresh) return false;
+  return !["/auth/sign-in", "/auth/sign-up", "/auth/sign-out", "/auth/refresh"].includes(path);
 }
 
 function transformData(value: unknown): unknown {
