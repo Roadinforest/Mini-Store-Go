@@ -130,6 +130,10 @@ func Load() (*Config, error) {
 }
 
 func applyRuntimeEnv(cfg *Config) error {
+	if origins := splitEnvList(os.Getenv("MINI_STORE_CORS_ALLOWED_ORIGINS")); len(origins) > 0 {
+		cfg.CORS.AllowedOrigins = origins
+	}
+
 	portValue := strings.TrimSpace(os.Getenv("PORT"))
 	if portValue == "" {
 		return nil
@@ -141,6 +145,18 @@ func applyRuntimeEnv(cfg *Config) error {
 	}
 	cfg.App.Port = port
 	return nil
+}
+
+func splitEnvList(value string) []string {
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 func setDefaults(v *viper.Viper) {

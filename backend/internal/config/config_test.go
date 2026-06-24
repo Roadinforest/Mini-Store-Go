@@ -37,6 +37,27 @@ func TestLoadReadsDatabaseDSNFromEnvWithoutConfigFile(t *testing.T) {
 	}
 }
 
+func TestLoadReadsCORSAllowedOriginsFromEnvWithoutConfigFile(t *testing.T) {
+	tempDir := t.TempDir()
+	chdir(t, tempDir)
+	t.Setenv("MINI_STORE_CORS_ALLOWED_ORIGINS", "https://mini-store-go-web.vercel.app, https://preview.example.com")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expected := []string{"https://mini-store-go-web.vercel.app", "https://preview.example.com"}
+	if len(cfg.CORS.AllowedOrigins) != len(expected) {
+		t.Fatalf("expected %d origins, got %d: %#v", len(expected), len(cfg.CORS.AllowedOrigins), cfg.CORS.AllowedOrigins)
+	}
+	for i, origin := range expected {
+		if cfg.CORS.AllowedOrigins[i] != origin {
+			t.Fatalf("expected origin %d to be %q, got %q", i, origin, cfg.CORS.AllowedOrigins[i])
+		}
+	}
+}
+
 func TestLoadUsesPlatformPortEnv(t *testing.T) {
 	tempDir := t.TempDir()
 	writeConfig(t, tempDir, `
