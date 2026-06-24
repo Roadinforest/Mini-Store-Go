@@ -16,6 +16,7 @@ import (
 	"mini-store-go/backend/internal/http/handler"
 	"mini-store-go/backend/internal/http/middleware"
 	gormrepo "mini-store-go/backend/internal/repository/gorm"
+	searchsvc "mini-store-go/backend/internal/search"
 	adminservice "mini-store-go/backend/internal/service/admin"
 	authservice "mini-store-go/backend/internal/service/auth"
 	cartservice "mini-store-go/backend/internal/service/cart"
@@ -83,7 +84,8 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 	}
 	aiHandler := handler.NewAIHandler(
 		validator,
-		ai.NewService(cfg.AI, aiModel, store.Products),
+		ai.NewService(cfg.AI, aiModel, store.Products, store.Reviews, searchsvc.NewService(cfg.Search, db, store.Products)),
+		log,
 	)
 
 	engine.Use(middleware.Authenticate(cfg.Auth, tokenManager, store.Users))

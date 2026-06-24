@@ -6,32 +6,41 @@ import (
 	"strings"
 
 	einoschema "github.com/cloudwego/eino/schema"
-	"github.com/shopspring/decimal"
 
 	"mini-store-go/backend/internal/apperror"
 	"mini-store-go/backend/internal/config"
 	"mini-store-go/backend/internal/domain/model"
 	"mini-store-go/backend/internal/dto"
 	"mini-store-go/backend/internal/repository"
+	searchsvc "mini-store-go/backend/internal/search"
 )
 
 type ChatModel interface {
 	Generate(ctx context.Context, messages []*einoschema.Message) (*einoschema.Message, error)
 	Stream(ctx context.Context, messages []*einoschema.Message) (*einoschema.StreamReader[*einoschema.Message], error)
+	BindTools(tools []*einoschema.ToolInfo) error
 }
 
 type Service struct {
 	cfg      config.AIConfig
 	model    ChatModel
 	products repository.ProductRepository
+	reviews  repository.ReviewRepository
+	search   *searchsvc.Service
 }
 
-func NewService(cfg config.AIConfig, model ChatModel, products repository.ProductRepository) *Service {
-	return &Service{
+func NewService(cfg config.AIConfig, model ChatModel, products repository.ProductRepository, reviews repository.ReviewRepository, search *searchsvc.Service) *Service {
+	service := &Service{
 		cfg:      cfg,
 		model:    model,
 		products: products,
+		reviews:  reviews,
+		search:   search,
 	}
+	if service.model != nil {
+		_ = service.model.BindTools(service.toolInfos())
+	}
+	return service
 }
 
 func (s *Service) Chat(ctx context.Context, input dto.ChatInput) (*dto.ChatOutput, error) {
@@ -44,15 +53,40 @@ func (s *Service) Chat(ctx context.Context, input dto.ChatInput) (*dto.ChatOutpu
 		return nil, err
 	}
 
-	msg, err := s.model.Generate(ctx, messages)
-	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to generate chat response", err)
+	rawParts := []string{}
+	for turn := 0; turn < 8; turn++ {
+		msg, err := s.model.Generate(ctx, messages)
+		if err != nil {
+			return nil, apperror.Wrap(apperror.CodeInternal, "failed to generate chat response", err)
+		}
+		rawParts = append(rawParts, msg.Content)
+
+		executions, err := s.executeToolCalls(ctx, msg)
+		if err != nil {
+			return nil, apperror.Wrap(apperror.CodeInternal, "failed to execute ai tool call", err)
+		}
+		if len(executions) == 0 {
+			return &dto.ChatOutput{
+				Role:       string(einoschema.Assistant),
+				Content:    VisibleContent(msg.Content),
+				RawContent: strings.Join(rawParts, "\n\n"),
+			}, nil
+		}
+
+		if navigation := firstNavigation(executions); navigation != nil {
+			return &dto.ChatOutput{
+				Role:        string(einoschema.Assistant),
+				Content:     navigation.Message,
+				RawContent:  strings.Join(rawParts, "\n\n"),
+				URL:         navigation.URL,
+				MessageType: ptrString("navigation"),
+			}, nil
+		}
+
+		messages = appendToolResultMessages(messages, msg, executions)
 	}
 
-	return &dto.ChatOutput{
-		Role:    string(einoschema.Assistant),
-		Content: strings.TrimSpace(msg.Content),
-	}, nil
+	return nil, apperror.New(apperror.CodeInternal, "ai agent exceeded maximum tool turns")
 }
 
 func (s *Service) Stream(ctx context.Context, input dto.ChatInput) (*einoschema.StreamReader[*einoschema.Message], error) {
@@ -162,14 +196,23 @@ func formatProductContext(product model.Product) string {
 	return strings.Join(parts, " | ")
 }
 
-func formatDecimal(value decimal.Decimal) string {
-	return value.StringFixedBank(2)
-}
-
 func compactText(value string, maxLen int) string {
 	value = strings.Join(strings.Fields(value), " ")
 	if len(value) <= maxLen {
 		return value
 	}
 	return value[:maxLen-3] + "..."
+}
+
+func firstNavigation(executions []toolExecution) *navigationResult {
+	for _, execution := range executions {
+		if execution.Result.Navigation != nil {
+			return execution.Result.Navigation
+		}
+	}
+	return nil
+}
+
+func ptrString(value string) *string {
+	return &value
 }

@@ -47,3 +47,7 @@ func (m *einoChatModel) Generate(ctx context.Context, messages []*einoschema.Mes
 func (m *einoChatModel) Stream(ctx context.Context, messages []*einoschema.Message) (*einoschema.StreamReader[*einoschema.Message], error) {
 	return m.model.Stream(ctx, messages)
 }
+
+func (m *einoChatModel) BindTools(tools []*einoschema.ToolInfo) error {
+	return m.model.BindTools(tools)
+}

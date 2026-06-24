@@ -13,8 +13,11 @@ type ChatInput struct {
 }
 
 type ChatOutput struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role        string  `json:"role"`
+	Content     string  `json:"content"`
+	URL         string  `json:"url,omitempty"`
+	MessageType *string `json:"messageType,omitempty"`
+	RawContent  string  `json:"-"`
 }
 
 type StreamChunk struct {

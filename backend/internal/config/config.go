@@ -19,6 +19,7 @@ type Config struct {
 	Log      LogConfig      `mapstructure:"log"`
 	CORS     CORSConfig     `mapstructure:"cors"`
 	AI       AIConfig       `mapstructure:"ai"`
+	Search   SearchConfig   `mapstructure:"search"`
 }
 
 type AppConfig struct {
@@ -89,6 +90,18 @@ type AIConfig struct {
 	Temperature        float32       `mapstructure:"temperature"`
 }
 
+type SearchConfig struct {
+	Enabled        bool          `mapstructure:"enabled"`
+	PineconeAPIKey string        `mapstructure:"pinecone_api_key"`
+	PineconeHost   string        `mapstructure:"pinecone_host"`
+	PineconeIndex  string        `mapstructure:"pinecone_index"`
+	QwenAPIKey     string        `mapstructure:"qwen_api_key"`
+	QwenBaseURL    string        `mapstructure:"qwen_base_url"`
+	EmbeddingModel string        `mapstructure:"embedding_model"`
+	RerankModel    string        `mapstructure:"rerank_model"`
+	Timeout        time.Duration `mapstructure:"timeout"`
+}
+
 func Load() (*Config, error) {
 	v := viper.New()
 	v.SetConfigName("config")
@@ -137,6 +150,27 @@ func applyRuntimeEnv(cfg *Config) error {
 			return fmt.Errorf("invalid MINI_STORE_AUTH_COOKIE_SECURE %q: must be a boolean", secure)
 		}
 		cfg.Auth.CookieSecure = value
+	}
+	if value := strings.TrimSpace(os.Getenv("PINECONE_API_KEY")); value != "" {
+		cfg.Search.PineconeAPIKey = value
+	}
+	if value := strings.TrimSpace(os.Getenv("PINECONE_HOST")); value != "" {
+		cfg.Search.PineconeHost = value
+	}
+	if value := strings.TrimSpace(os.Getenv("PINECONE_INDEX")); value != "" {
+		cfg.Search.PineconeIndex = value
+	}
+	if value := strings.TrimSpace(os.Getenv("QWEN_API_KEY")); value != "" {
+		cfg.Search.QwenAPIKey = value
+		if strings.TrimSpace(cfg.AI.APIKey) == "" {
+			cfg.AI.APIKey = value
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("QWEN_BASE_URL")); value != "" {
+		cfg.Search.QwenBaseURL = value
+		if strings.TrimSpace(cfg.AI.BaseURL) == "" {
+			cfg.AI.BaseURL = value
+		}
 	}
 
 	portValue := strings.TrimSpace(os.Getenv("PORT"))
@@ -217,6 +251,16 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ai.timeout", "60s")
 	v.SetDefault("ai.max_context_products", 5)
 	v.SetDefault("ai.temperature", 0.3)
+
+	v.SetDefault("search.enabled", false)
+	v.SetDefault("search.pinecone_api_key", "")
+	v.SetDefault("search.pinecone_host", "")
+	v.SetDefault("search.pinecone_index", "mini-store")
+	v.SetDefault("search.qwen_api_key", "")
+	v.SetDefault("search.qwen_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+	v.SetDefault("search.embedding_model", "text-embedding-v3")
+	v.SetDefault("search.rerank_model", "qwen3-rerank")
+	v.SetDefault("search.timeout", "30s")
 }
 
 func errorAs(err error, target *viper.ConfigFileNotFoundError) bool {

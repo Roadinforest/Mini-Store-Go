@@ -78,3 +78,16 @@ ai:
   timeout: 60s
   max_context_products: 5
   temperature: 0.3
+
+search:
+  enabled: false
+  # Compatible with the original mini-store env vars: PINECONE_API_KEY,
+  # PINECONE_HOST, PINECONE_INDEX, QWEN_API_KEY, QWEN_BASE_URL.
+  pinecone_api_key: ""
+  pinecone_host: ""
+  pinecone_index: mini-store
+  qwen_api_key: ""
+  qwen_base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  embedding_model: text-embedding-v3
+  rerank_model: qwen3-rerank
+  timeout: 30s

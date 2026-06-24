@@ -3,11 +3,9 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"strings"
 
-	einoschema "github.com/cloudwego/eino/schema"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"mini-store-go/backend/internal/ai"
 	"mini-store-go/backend/internal/dto"
@@ -18,12 +16,17 @@ import (
 type AIHandler struct {
 	validator *validation.Validator
 	service   *ai.Service
+	log       *zap.Logger
 }
 
-func NewAIHandler(validator *validation.Validator, service *ai.Service) *AIHandler {
+func NewAIHandler(validator *validation.Validator, service *ai.Service, log *zap.Logger) *AIHandler {
+	if log == nil {
+		log = zap.NewNop()
+	}
 	return &AIHandler{
 		validator: validator,
 		service:   service,
+		log:       log,
 	}
 }
 
@@ -44,6 +47,12 @@ func (h *AIHandler) Chat(c *gin.Context) {
 		return
 	}
 
+	h.log.Info("ai chat completion",
+		zap.Any("messages", input.Messages),
+		zap.String("assistant_raw_content", output.RawContent),
+		zap.String("assistant_visible_content", output.Content),
+	)
+
 	response.OK(c, output)
 }
 
@@ -58,12 +67,11 @@ func (h *AIHandler) Stream(c *gin.Context) {
 		return
 	}
 
-	stream, err := h.service.Stream(c.Request.Context(), input)
+	output, err := h.service.Chat(c.Request.Context(), input)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
-	defer stream.Close()
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -76,52 +84,34 @@ func (h *AIHandler) Stream(c *gin.Context) {
 		return
 	}
 
-	var contentBuilder strings.Builder
-	for {
-		msg, recvErr := stream.Recv()
-		if recvErr == io.EOF {
-			break
-		}
-		if recvErr != nil {
-			writeSSEChunk(c, dto.StreamChunk{
-				Type:    "error",
-				Content: "抱歉，我遇到了一些问题。请稍后再试。",
-			})
-			flusher.Flush()
-			return
-		}
+	h.log.Info("ai stream completion",
+		zap.Any("messages", input.Messages),
+		zap.String("assistant_raw_content", output.RawContent),
+		zap.String("assistant_visible_content", output.Content),
+	)
 
-		writeMessageChunks(c, msg, &contentBuilder)
+	if output.URL != "" {
+		writeSSEChunk(c, dto.StreamChunk{
+			Type:    "navigation",
+			Content: output.Content,
+			URL:     output.URL,
+			Message: output.Content,
+		})
+		fmt.Fprint(c.Writer, "data: [DONE]\n\n")
 		flusher.Flush()
-	}
-
-	writeSSEChunk(c, dto.StreamChunk{
-		Type:    "complete",
-		Content: contentBuilder.String(),
-	})
-	fmt.Fprint(c.Writer, "data: [DONE]\n\n")
-	flusher.Flush()
-}
-
-func writeMessageChunks(c *gin.Context, msg *einoschema.Message, contentBuilder *strings.Builder) {
-	if msg == nil {
 		return
 	}
 
-	if strings.TrimSpace(msg.ReasoningContent) != "" {
-		writeSSEChunk(c, dto.StreamChunk{
-			Type:    "thinking",
-			Content: msg.ReasoningContent,
-		})
-	}
-
-	if strings.TrimSpace(msg.Content) != "" {
-		contentBuilder.WriteString(msg.Content)
-		writeSSEChunk(c, dto.StreamChunk{
-			Type:    "partial",
-			Content: msg.Content,
-		})
-	}
+	writeSSEChunk(c, dto.StreamChunk{
+		Type:    "partial",
+		Content: output.Content,
+	})
+	writeSSEChunk(c, dto.StreamChunk{
+		Type:    "complete",
+		Content: output.Content,
+	})
+	fmt.Fprint(c.Writer, "data: [DONE]\n\n")
+	flusher.Flush()
 }
 
 func writeSSEChunk(c *gin.Context, chunk dto.StreamChunk) {
