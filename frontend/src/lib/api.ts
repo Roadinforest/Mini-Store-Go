@@ -8,8 +8,12 @@ export type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   url?: string;
-  messageType?: "normal" | "tool_call" | "navigation";
+  messageType?: "normal" | "thinking" | "tool_call" | "navigation";
   toolName?: string;
+  toolCalls?: Array<{
+    toolName: string;
+    content: string;
+  }>;
 };
 
 export type ChatStreamChunk = {

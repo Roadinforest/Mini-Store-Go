@@ -54,6 +54,7 @@ func (s *Service) Chat(ctx context.Context, input dto.ChatInput) (*dto.ChatOutpu
 	}
 
 	rawParts := []string{}
+	toolCalls := []dto.ToolCallOutput{}
 	for turn := 0; turn < 8; turn++ {
 		msg, err := s.model.Generate(ctx, messages)
 		if err != nil {
@@ -69,9 +70,11 @@ func (s *Service) Chat(ctx context.Context, input dto.ChatInput) (*dto.ChatOutpu
 			return &dto.ChatOutput{
 				Role:       string(einoschema.Assistant),
 				Content:    VisibleContent(msg.Content),
+				ToolCalls:  toolCalls,
 				RawContent: strings.Join(rawParts, "\n\n"),
 			}, nil
 		}
+		toolCalls = append(toolCalls, toToolCallOutputs(executions)...)
 
 		if navigation := firstNavigation(executions); navigation != nil {
 			return &dto.ChatOutput{
@@ -80,6 +83,7 @@ func (s *Service) Chat(ctx context.Context, input dto.ChatInput) (*dto.ChatOutpu
 				RawContent:  strings.Join(rawParts, "\n\n"),
 				URL:         navigation.URL,
 				MessageType: ptrString("navigation"),
+				ToolCalls:   toolCalls,
 			}, nil
 		}
 
@@ -215,4 +219,15 @@ func firstNavigation(executions []toolExecution) *navigationResult {
 
 func ptrString(value string) *string {
 	return &value
+}
+
+func toToolCallOutputs(executions []toolExecution) []dto.ToolCallOutput {
+	outputs := make([]dto.ToolCallOutput, 0, len(executions))
+	for _, execution := range executions {
+		outputs = append(outputs, dto.ToolCallOutput{
+			ToolName: execution.Call.Name,
+			Content:  execution.Hint,
+		})
+	}
+	return outputs
 }

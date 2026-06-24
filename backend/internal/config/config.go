@@ -204,7 +204,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("app.host", "0.0.0.0")
 	v.SetDefault("app.port", 8080)
 	v.SetDefault("app.read_timeout", "10s")
-	v.SetDefault("app.write_timeout", "10s")
+	v.SetDefault("app.write_timeout", "180s")
 	v.SetDefault("app.idle_timeout", "60s")
 	v.SetDefault("app.shutdown_timeout", "10s")
 

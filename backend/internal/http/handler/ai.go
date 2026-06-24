@@ -67,12 +67,6 @@ func (h *AIHandler) Stream(c *gin.Context) {
 		return
 	}
 
-	output, err := h.service.Chat(c.Request.Context(), input)
-	if err != nil {
-		writeError(c, err)
-		return
-	}
-
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -84,11 +78,37 @@ func (h *AIHandler) Stream(c *gin.Context) {
 		return
 	}
 
+	writeSSEChunk(c, dto.StreamChunk{
+		Type:    "thinking",
+		Content: "正在思考...",
+	})
+	flusher.Flush()
+
+	output, err := h.service.Chat(c.Request.Context(), input)
+	if err != nil {
+		writeSSEChunk(c, dto.StreamChunk{
+			Type:    "error",
+			Content: "智能助手暂时不可用，请稍后再试。",
+		})
+		fmt.Fprint(c.Writer, "data: [DONE]\n\n")
+		flusher.Flush()
+		return
+	}
+
 	h.log.Info("ai stream completion",
 		zap.Any("messages", input.Messages),
 		zap.String("assistant_raw_content", output.RawContent),
 		zap.String("assistant_visible_content", output.Content),
 	)
+
+	for _, toolCall := range output.ToolCalls {
+		writeSSEChunk(c, dto.StreamChunk{
+			Type:     "tool_call",
+			Content:  toolCall.Content,
+			ToolName: toolCall.ToolName,
+		})
+		flusher.Flush()
+	}
 
 	if output.URL != "" {
 		writeSSEChunk(c, dto.StreamChunk{

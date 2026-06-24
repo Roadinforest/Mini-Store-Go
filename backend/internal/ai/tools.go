@@ -46,6 +46,7 @@ type toolCall struct {
 type toolExecution struct {
 	Call   toolCall
 	Result toolResult
+	Hint   string
 }
 
 type toolResult struct {
@@ -127,10 +128,23 @@ func (s *Service) executeToolCalls(ctx context.Context, msg *einoschema.Message)
 		if err != nil {
 			return nil, err
 		}
-		executions = append(executions, toolExecution{Call: call, Result: result})
+		executions = append(executions, toolExecution{
+			Call:   call,
+			Result: result,
+			Hint:   toolHint(definition, call),
+		})
 	}
 
 	return executions, nil
+}
+
+func toolHint(definition toolDefinition, call toolCall) string {
+	if definition.hint != nil {
+		if hint := strings.TrimSpace(definition.hint(call.Params)); hint != "" {
+			return hint
+		}
+	}
+	return fmt.Sprintf("正在调用工具: %s", call.Name)
 }
 
 func parseMessageToolCalls(msg *einoschema.Message) []toolCall {

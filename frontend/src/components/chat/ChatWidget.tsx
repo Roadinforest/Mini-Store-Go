@@ -1,6 +1,6 @@
-import { MessageCircle, SendHorizontal, X } from "lucide-react";
+import { LoaderCircle, MessageCircle, SendHorizontal, X } from "lucide-react";
 import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
-import { createChatStream, sendChat, type ChatMessage, type ChatStreamChunk } from "@/lib/api";
+import { sendChat, type ChatMessage } from "@/lib/api";
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
@@ -36,39 +36,47 @@ export function ChatWidget() {
     };
 
     const nextMessages = [...messages, userMessage];
-    setMessages(nextMessages);
+    setMessages([
+      ...nextMessages,
+      {
+        role: "assistant",
+        content: "正在思考...",
+        messageType: "thinking",
+      },
+    ]);
     setInput("");
     setError(null);
     setIsLoading(true);
-    let placeholderAdded = false;
 
     try {
-      const response = await createChatStream(nextMessages);
-      if (!response.ok || !response.body) {
-        throw new Error("stream unavailable");
-      }
-
-      setMessages((current) => [...current, { role: "assistant", content: "" }]);
-      placeholderAdded = true;
-      await consumeStream(response, setMessages);
-    } catch {
       const fallback = await sendChat(nextMessages);
       if (!fallback.success || !fallback.data) {
-        setError(fallback.message || "智能助手暂时不可用，请稍后再试。");
-        setMessages((current) =>
-          placeholderAdded
-            ? replaceLastAssistant(current, "智能助手暂时不可用，请稍后再试。")
-            : [...current, { role: "assistant", content: "智能助手暂时不可用，请稍后再试。" }],
-        );
+        const message = friendlyChatError(fallback.message);
+        setError(message);
+        setMessages((current) => replaceLastAssistant(current, { content: "智能助手暂时不可用，请稍后再试。", messageType: "normal" }));
       } else {
+        const toolHint = latestToolHint(fallback.data);
+        if (toolHint) {
+          setMessages((current) =>
+            replaceLastAssistant(current, {
+              content: toolHint,
+              messageType: "tool_call",
+              toolName: fallback.data?.toolCalls?.at(-1)?.toolName,
+            }),
+          );
+          await sleep(450);
+        }
         const visibleFallback = {
           ...fallback.data,
           content: visibleAssistantContent(fallback.data.content),
+          messageType: fallback.data.messageType ?? "normal",
         };
-        setMessages((current) =>
-          placeholderAdded ? replaceLastAssistant(current, visibleFallback.content) : [...current, visibleFallback],
-        );
+        setMessages((current) => replaceLastAssistant(current, visibleFallback));
       }
+    } catch {
+      const message = "无法连接到后端服务，请检查 API 地址、CORS 配置或后端是否正在运行。";
+      setError(message);
+      setMessages((current) => replaceLastAssistant(current, { content: "智能助手暂时不可用，请稍后再试。", messageType: "normal" }));
     } finally {
       setIsLoading(false);
     }
@@ -106,7 +114,11 @@ export function ChatWidget() {
                       : "rounded-bl-sm border bg-background text-foreground"
                   }`}
                 >
-                  <ChatMessageBody content={message.content || (isLoading && index === messages.length - 1 ? "正在思考..." : "")} />
+                  <ChatMessageBody
+                    content={message.content || (isLoading && index === messages.length - 1 ? "正在思考..." : "")}
+                    isPending={isLoading && index === messages.length - 1 && message.role === "assistant" && !message.content}
+                    messageType={message.messageType}
+                  />
                 </div>
               </div>
             ))}
@@ -153,87 +165,17 @@ export function ChatWidget() {
   );
 }
 
-async function consumeStream(
-  response: Response,
-  setMessages: (value: ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[])) => void,
-) {
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error("no response body");
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let rawAssistantContent = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() ?? "";
-
-    for (const chunk of chunks) {
-      const line = chunk
-        .split("\n")
-        .find((item) => item.startsWith("data: "));
-      if (!line) continue;
-
-      const payload = line.slice(6);
-      if (payload === "[DONE]") continue;
-
-      const data = JSON.parse(payload) as ChatStreamChunk;
-      rawAssistantContent = applyStreamChunk(data, setMessages, rawAssistantContent);
-    }
-  }
-}
-
-function applyStreamChunk(
-  chunk: ChatStreamChunk,
-  setMessages: (value: ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[])) => void,
-  rawAssistantContent: string,
-) {
-  if (chunk.type === "error") {
-    setMessages((current) => replaceLastAssistant(current, chunk.content || "智能助手暂时不可用，请稍后再试。"));
-    return rawAssistantContent;
-  }
-
-  if (chunk.type === "partial") {
-    const nextRawContent = `${rawAssistantContent}${chunk.content || ""}`;
-    setMessages((current) => replaceLastAssistant(current, visibleAssistantContent(nextRawContent)));
-    return nextRawContent;
-  }
-
-  if (chunk.type === "complete") {
-    const nextRawContent = chunk.content ?? rawAssistantContent;
-    setMessages((current) => replaceLastAssistant(current, visibleAssistantContent(nextRawContent)));
-    return nextRawContent;
-  }
-
-  if (chunk.type === "navigation") {
-    const message = chunk.message || chunk.content || "正在跳转到产品页面...";
-    setMessages((current) => replaceLastAssistant(current, message));
-    if (chunk.url) {
-      window.location.href = chunk.url;
-    }
-    return rawAssistantContent;
-  }
-
-  return rawAssistantContent;
-}
-
-function replaceLastAssistant(messages: ChatMessage[], content: string) {
+function replaceLastAssistant(messages: ChatMessage[], message: Pick<ChatMessage, "content"> & Partial<ChatMessage>) {
   const next = [...messages];
   const lastIndex = next.length - 1;
   if (lastIndex < 0 || next[lastIndex]?.role !== "assistant") {
-    next.push({ role: "assistant", content });
+    next.push({ role: "assistant", ...message });
     return next;
   }
 
   next[lastIndex] = {
     ...next[lastIndex],
-    content,
+    ...message,
   };
   return next;
 }
@@ -242,7 +184,34 @@ function visibleAssistantContent(content: string) {
   return content.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, "").trim();
 }
 
-function ChatMessageBody({ content }: { content: string }) {
+function latestToolHint(message: ChatMessage) {
+  return message.toolCalls?.at(-1)?.content;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function friendlyChatError(message?: string) {
+  if (!message || message === "Failed to fetch" || message === "NetworkError when attempting to fetch resource.") {
+    return "无法连接到后端服务，请检查 API 地址、CORS 配置或后端是否正在运行。";
+  }
+  return message;
+}
+
+function ChatMessageBody({
+  content,
+  isPending = false,
+  messageType,
+}: {
+  content: string;
+  isPending?: boolean;
+  messageType?: ChatMessage["messageType"];
+}) {
+  if (isPending || messageType === "thinking" || messageType === "tool_call") {
+    return <StatusMessage content={content} />;
+  }
+
   const blocks = parseMarkdownBlocks(content);
 
   if (blocks.length === 0) {
@@ -318,6 +287,15 @@ function ChatMessageBody({ content }: { content: string }) {
           </p>
         );
       })}
+    </div>
+  );
+}
+
+function StatusMessage({ content }: { content: string }) {
+  return (
+    <div className="inline-flex items-center gap-2 text-muted-foreground">
+      <LoaderCircle className="size-4 animate-spin" />
+      <span>{content}</span>
     </div>
   );
 }

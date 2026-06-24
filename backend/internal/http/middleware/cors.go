@@ -12,7 +12,12 @@ import (
 
 func CORS(cfg config.CORSConfig) gin.HandlerFunc {
 	allowedOrigins := make(map[string]struct{}, len(cfg.AllowedOrigins))
+	allowAnyOrigin := false
 	for _, origin := range cfg.AllowedOrigins {
+		if strings.TrimSpace(origin) == "*" {
+			allowAnyOrigin = true
+			continue
+		}
 		allowedOrigins[origin] = struct{}{}
 	}
 
@@ -24,7 +29,7 @@ func CORS(cfg config.CORSConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 		if origin != "" {
-			if _, ok := allowedOrigins[origin]; ok {
+			if _, ok := allowedOrigins[origin]; ok || allowAnyOrigin {
 				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 				if cfg.AllowCredentials {
 					c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
