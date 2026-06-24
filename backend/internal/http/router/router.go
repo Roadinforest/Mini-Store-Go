@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -23,7 +22,6 @@ import (
 	orderservice "mini-store-go/backend/internal/service/order"
 	productservice "mini-store-go/backend/internal/service/product"
 	reviewservice "mini-store-go/backend/internal/service/review"
-	uploadservice "mini-store-go/backend/internal/service/upload"
 	userservice "mini-store-go/backend/internal/service/user"
 	"mini-store-go/backend/internal/validation"
 )
@@ -79,11 +77,6 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 		validator,
 		adminservice.NewService(db, store.Users),
 	)
-	uploadSvc, err := uploadservice.NewService(cfg.Upload)
-	if err != nil {
-		return nil, fmt.Errorf("init upload service: %w", err)
-	}
-	uploadHandler := handler.NewUploadHandler(uploadSvc)
 	aiModel, err := ai.NewEinoChatModel(context.Background(), cfg.AI)
 	if err != nil {
 		return nil, fmt.Errorf("init ai model: %w", err)
@@ -94,7 +87,6 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 	)
 
 	engine.Use(middleware.Authenticate(cfg.Auth, tokenManager, store.Users))
-	engine.StaticFS(cfg.Upload.PublicBasePath, gin.Dir(filepath.Clean(cfg.Upload.StorageDir), false))
 
 	api := engine.Group("/api/v1")
 	{
@@ -147,11 +139,6 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 		{
 			aiGroup.POST("/chat", aiHandler.Chat)
 			aiGroup.POST("/chat/stream", aiHandler.Stream)
-		}
-
-		uploadGroup := api.Group("/uploads", middleware.RequireAuth())
-		{
-			uploadGroup.POST("/images", uploadHandler.UploadImage)
 		}
 
 		orderGroup := api.Group("/orders", middleware.RequireAuth())

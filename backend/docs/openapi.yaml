@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Mini Store API
   version: 1.0.0
-  description: API contract for the Go backend, including commerce, account, upload, and AI endpoints.
+  description: API contract for the Go backend, including commerce, account, and AI endpoints.
 servers:
   - url: http://localhost:8080
 tags:
@@ -13,7 +13,6 @@ tags:
   - name: Cart
   - name: Orders
   - name: Admin
-  - name: Uploads
   - name: AI
 paths:
   /healthz:
@@ -350,31 +349,6 @@ paths:
       responses:
         '200':
           description: Order details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Envelope'
-  /api/v1/uploads/images:
-    post:
-      tags: [Uploads]
-      summary: Upload product or profile image
-      security:
-        - cookieAuth: []
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [file]
-              properties:
-                file:
-                  type: string
-                  format: binary
-      responses:
-        '200':
-          description: Uploaded file metadata
           content:
             application/json:
               schema:
