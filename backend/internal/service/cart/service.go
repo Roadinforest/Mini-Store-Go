@@ -12,6 +12,7 @@ import (
 	"mini-store-go/backend/internal/apperror"
 	"mini-store-go/backend/internal/domain/model"
 	"mini-store-go/backend/internal/domain/valueobject"
+	"mini-store-go/backend/internal/infra/rediscache"
 	"mini-store-go/backend/internal/repository"
 )
 
@@ -23,14 +24,16 @@ const (
 )
 
 type Service struct {
-	carts    repository.CartRepository
-	products repository.ProductRepository
+	carts      repository.CartRepository
+	products   repository.ProductRepository
+	stockStore *rediscache.StockStore
 }
 
-func NewService(carts repository.CartRepository, products repository.ProductRepository) *Service {
+func NewService(carts repository.CartRepository, products repository.ProductRepository, stockStore *rediscache.StockStore) *Service {
 	return &Service{
-		carts:    carts,
-		products: products,
+		carts:      carts,
+		products:   products,
+		stockStore: stockStore,
 	}
 }
 
@@ -53,6 +56,7 @@ func (s *Service) AddItem(ctx context.Context, sessionCartID string, userID *str
 		}
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to load product", err)
 	}
+	availableStock := s.availableStock(ctx, product)
 
 	cart, err := s.resolveCart(ctx, sessionCartID, userID)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -73,12 +77,12 @@ func (s *Service) AddItem(ctx context.Context, sessionCartID string, userID *str
 
 	if index >= 0 {
 		nextQty := items[index].Qty + 1
-		if product.Stock < nextQty {
+		if availableStock < nextQty {
 			return nil, apperror.New(apperror.CodeOutOfStock, "not enough stock")
 		}
 		items[index].Qty = nextQty
 	} else {
-		if product.Stock < 1 {
+		if availableStock < 1 {
 			return nil, apperror.New(apperror.CodeOutOfStock, "not enough stock")
 		}
 		items = append(items, valueobject.CartItem{
@@ -96,6 +100,19 @@ func (s *Service) AddItem(ctx context.Context, sessionCartID string, userID *str
 		return nil, err
 	}
 	return cart, nil
+}
+
+func (s *Service) availableStock(ctx context.Context, product *model.Product) int {
+	if s.stockStore == nil || !s.stockStore.Enabled() {
+		return product.Stock
+	}
+
+	_ = s.stockStore.PrimeStocks(ctx, map[string]int{product.ID: product.Stock})
+	stock, ok, err := s.stockStore.Available(ctx, product.ID)
+	if err != nil || !ok {
+		return product.Stock
+	}
+	return stock
 }
 
 func (s *Service) RemoveItem(ctx context.Context, sessionCartID string, userID *string, productID string) (*model.Cart, error) {
