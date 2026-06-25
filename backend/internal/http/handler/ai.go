@@ -2,7 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -84,6 +87,100 @@ func (h *AIHandler) Stream(c *gin.Context) {
 	})
 	flusher.Flush()
 
+	stream, err := h.service.Stream(c.Request.Context(), input)
+	if err != nil {
+		writeSSEChunk(c, dto.StreamChunk{
+			Type:    "error",
+			Content: "智能助手暂时不可用，请稍后再试。",
+		})
+		fmt.Fprint(c.Writer, "data: [DONE]\n\n")
+		flusher.Flush()
+		return
+	}
+	streamClosed := false
+	defer func() {
+		if !streamClosed {
+			stream.Close()
+		}
+	}()
+
+	var rawContent strings.Builder
+	var visibleContent strings.Builder
+	filter := newStreamingThinkFilter()
+
+	for {
+		chunk, recvErr := stream.Recv()
+		if errors.Is(recvErr, io.EOF) {
+			break
+		}
+		if recvErr != nil {
+			writeSSEChunk(c, dto.StreamChunk{
+				Type:    "error",
+				Content: "智能助手暂时不可用，请稍后再试。",
+			})
+			fmt.Fprint(c.Writer, "data: [DONE]\n\n")
+			flusher.Flush()
+			return
+		}
+
+		if chunk == nil {
+			continue
+		}
+
+		nextRawContent := rawContent.String() + chunk.Content
+		if hasStreamingToolIntent(nextRawContent) || len(chunk.ToolCalls) > 0 {
+			stream.Close()
+			streamClosed = true
+			h.writeNonStreamingChatResult(c, flusher, input)
+			return
+		}
+
+		rawContent.WriteString(chunk.Content)
+		visibleDelta := filter.Push(chunk.Content)
+		if visibleDelta == "" {
+			continue
+		}
+
+		visibleContent.WriteString(visibleDelta)
+		writeSSEChunk(c, dto.StreamChunk{
+			Type:    "partial",
+			Content: visibleDelta,
+		})
+		flusher.Flush()
+	}
+
+	if visibleDelta := filter.Flush(); visibleDelta != "" {
+		visibleContent.WriteString(visibleDelta)
+		writeSSEChunk(c, dto.StreamChunk{
+			Type:    "partial",
+			Content: visibleDelta,
+		})
+		flusher.Flush()
+	}
+
+	finalContent := strings.TrimSpace(visibleContent.String())
+
+	h.log.Info("ai stream completion",
+		zap.Any("messages", input.Messages),
+		zap.String("assistant_raw_content", rawContent.String()),
+		zap.String("assistant_visible_content", finalContent),
+	)
+
+	writeSSEChunk(c, dto.StreamChunk{
+		Type:    "complete",
+		Content: finalContent,
+	})
+	fmt.Fprint(c.Writer, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+func (h *AIHandler) writeNonStreamingChatResult(c *gin.Context, flusher interface{ Flush() }, input dto.ChatInput) {
+	writeSSEChunk(c, dto.StreamChunk{
+		Type:    "tool_call",
+		Content: "正在查询商品信息...",
+	})
+	flusher.Flush()
+
 	output, err := h.service.Chat(c.Request.Context(), input)
 	if err != nil {
 		writeSSEChunk(c, dto.StreamChunk{
@@ -95,7 +192,7 @@ func (h *AIHandler) Stream(c *gin.Context) {
 		return
 	}
 
-	h.log.Info("ai stream completion",
+	h.log.Info("ai stream fallback completion",
 		zap.Any("messages", input.Messages),
 		zap.String("assistant_raw_content", output.RawContent),
 		zap.String("assistant_visible_content", output.Content),
@@ -140,4 +237,93 @@ func writeSSEChunk(c *gin.Context, chunk dto.StreamChunk) {
 		return
 	}
 	fmt.Fprintf(c.Writer, "data: %s\n\n", payload)
+}
+
+func hasStreamingToolIntent(content string) bool {
+	return strings.Contains(content, "<tool_call>") || strings.Contains(content, "</tool_call>")
+}
+
+type streamingThinkFilter struct {
+	inThink bool
+	pending string
+}
+
+func newStreamingThinkFilter() *streamingThinkFilter {
+	return &streamingThinkFilter{}
+}
+
+func (f *streamingThinkFilter) Push(content string) string {
+	input := f.pending + content
+	f.pending = ""
+
+	var output strings.Builder
+	for input != "" {
+		if f.inThink {
+			closeIndex := strings.Index(input, "</think>")
+			if closeIndex < 0 {
+				f.pending = suffixMatchingPrefix(input, "</think>")
+				return output.String()
+			}
+			input = input[closeIndex+len("</think>"):]
+			f.inThink = false
+			continue
+		}
+
+		openIndex := strings.Index(input, "<")
+		if openIndex < 0 {
+			output.WriteString(input)
+			break
+		}
+		output.WriteString(input[:openIndex])
+		input = input[openIndex:]
+
+		if strings.HasPrefix(input, "<think>") {
+			input = input[len("<think>"):]
+			f.inThink = true
+			continue
+		}
+		if isHeldMarkupPrefix(input) {
+			f.pending = input
+			break
+		}
+
+		output.WriteByte(input[0])
+		input = input[1:]
+	}
+
+	return output.String()
+}
+
+func (f *streamingThinkFilter) Flush() string {
+	if f.inThink {
+		f.pending = ""
+		return ""
+	}
+	pending := f.pending
+	f.pending = ""
+	return pending
+}
+
+func suffixMatchingPrefix(value, pattern string) string {
+	maxLen := len(pattern) - 1
+	if len(value) < maxLen {
+		maxLen = len(value)
+	}
+	for size := maxLen; size > 0; size-- {
+		suffix := value[len(value)-size:]
+		if strings.HasPrefix(pattern, suffix) {
+			return suffix
+		}
+	}
+	return ""
+}
+
+func isHeldMarkupPrefix(value string) bool {
+	if strings.HasPrefix("<think>", value) {
+		return true
+	}
+	if strings.HasPrefix("<tool_call>", value) {
+		return true
+	}
+	return strings.HasPrefix("</tool_call>", value)
 }
