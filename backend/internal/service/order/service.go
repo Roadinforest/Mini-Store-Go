@@ -3,11 +3,13 @@ package orderservice
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"mini-store-go/backend/internal/apperror"
 	"mini-store-go/backend/internal/domain/model"
@@ -51,61 +53,49 @@ func (s *Service) Create(ctx context.Context, userID string, sessionCartID strin
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to load user", err)
 	}
 
-	cart, err := s.loadCheckoutCart(ctx, userID, sessionCartID)
-	if err != nil {
-		return nil, err
-	}
-	if len(cart.Items.Data) == 0 {
-		return nil, apperror.New(apperror.CodeBadRequest, "cart is empty")
-	}
-	if !user.Address.Valid || !isCompleteAddress(user.Address.Data) {
-		return nil, apperror.New(apperror.CodeBadRequest, "shipping address is required")
-	}
-	if user.PaymentMethod == nil || *user.PaymentMethod == "" {
-		return nil, apperror.New(apperror.CodeBadRequest, "payment method is required")
-	}
-
-	order := &model.Order{
-		ID:              uuid.NewString(),
-		UserID:          user.ID,
-		ShippingAddress: user.Address,
-		PaymentMethod:   *user.PaymentMethod,
-		PaymentResult:   valueobject.JSON[valueobject.PaymentResult]{},
-		ItemsPrice:      cart.ItemsPrice,
-		ShippingPrice:   cart.ShippingPrice,
-		TaxPrice:        cart.TaxPrice,
-		TotalPrice:      cart.TotalPrice,
-		IsPaid:          false,
-		IsDelivered:     false,
-		CreatedAt:       time.Now().UTC(),
-		OrderItems:      nil,
-	}
-	order.OrderItems = toOrderItems(order.ID, cart.Items.Data)
-
-	reserved, err := s.reserveStock(ctx, order.ID, cart.Items.Data)
-	if err != nil {
-		return nil, err
-	}
-
+	var order *model.Order
+	reserved := false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		cart, err := s.loadCheckoutCart(tx, userID, sessionCartID)
+		if err != nil {
+			return err
+		}
+		if len(cart.Items.Data) == 0 {
+			return apperror.New(apperror.CodeBadRequest, "cart is empty")
+		}
+		if !user.Address.Valid || !isCompleteAddress(user.Address.Data) {
+			return apperror.New(apperror.CodeBadRequest, "shipping address is required")
+		}
+		if user.PaymentMethod == nil || *user.PaymentMethod == "" {
+			return apperror.New(apperror.CodeBadRequest, "payment method is required")
+		}
+		order = &model.Order{
+			ID: uuid.NewString(), UserID: user.ID, ShippingAddress: user.Address,
+			PaymentMethod: *user.PaymentMethod, ItemsPrice: cart.ItemsPrice,
+			ShippingPrice: cart.ShippingPrice, TaxPrice: cart.TaxPrice,
+			TotalPrice: cart.TotalPrice, CreatedAt: time.Now().UTC(),
+		}
+		order.OrderItems = toOrderItems(order.ID, cart.Items.Data)
+		reserved, err = s.reserveStock(ctx, order.ID, cart.Items.Data)
+		if err != nil {
+			return err
+		}
 		if err := tx.Create(order).Error; err != nil {
 			return err
 		}
-
 		cart.Items = valueobject.NewJSONArray([]valueobject.CartItem{})
-		cart.ItemsPrice = decimal.Zero
-		cart.ShippingPrice = decimal.Zero
-		cart.TaxPrice = decimal.Zero
-		cart.TotalPrice = decimal.Zero
-
-		if err := tx.Save(cart).Error; err != nil {
-			return err
-		}
-		return nil
+		cart.ItemsPrice, cart.ShippingPrice, cart.TaxPrice, cart.TotalPrice = decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
+		return tx.Save(cart).Error
 	})
 	if err != nil {
 		if reserved {
-			_ = s.stockStore.Release(ctx, order.ID)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = s.stockStore.Release(cleanupCtx, order.ID)
+		}
+		var appErr *apperror.Error
+		if errors.As(err, &appErr) {
+			return nil, appErr
 		}
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to create order", err)
 	}
@@ -143,15 +133,21 @@ func (s *Service) List(ctx context.Context, page dto.PageParams) ([]model.Order,
 }
 
 func (s *Service) MarkPaid(ctx context.Context, orderID string) (*model.Order, error) {
-	order, err := s.GetByID(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	if order.IsPaid {
-		return order, nil
-	}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order model.Order
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ?", orderID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperror.New(apperror.CodeNotFound, "order not found")
+			}
+			return err
+		}
+		if order.IsPaid {
+			return nil
+		}
+		if err := tx.Where(`"orderId" = ?`, orderID).Order(`"productId"`).Find(&order.OrderItems).Error; err != nil {
+			return err
+		}
 
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, item := range order.OrderItems {
 			result := tx.Model(&model.Product{}).
 				Where("id = ? AND stock >= ?", item.ProductID, item.Qty).
@@ -167,7 +163,7 @@ func (s *Service) MarkPaid(ctx context.Context, orderID string) (*model.Order, e
 		now := time.Now().UTC()
 		order.IsPaid = true
 		order.PaidAt = &now
-		return tx.Save(order).Error
+		return tx.Model(&order).Updates(map[string]interface{}{"isPaid": true, "paidAt": now}).Error
 	})
 	if err != nil {
 		var appErr *apperror.Error
@@ -204,31 +200,24 @@ func (s *Service) MarkDelivered(ctx context.Context, orderID string) (*model.Ord
 	return s.GetByID(ctx, orderID)
 }
 
-func (s *Service) loadCheckoutCart(ctx context.Context, userID, sessionCartID string) (*model.Cart, error) {
-	cart, err := s.carts.GetByUserID(ctx, userID)
-	if err == nil {
-		if cart.SessionCartID == "" {
-			cart.SessionCartID = sessionCartID
-			_ = s.carts.Update(ctx, cart)
-		}
-		return cart, nil
+// The cart is consumed under the same row lock and transaction as order creation.
+func (s *Service) loadCheckoutCart(tx *gorm.DB, userID, sessionCartID string) (*model.Cart, error) {
+	var cart model.Cart
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(`"userId" = ?`, userID).First(&cart).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(`"sessionCartId" = ? AND ("userId" IS NULL OR "userId" = ?)`, sessionCartID, userID).First(&cart).Error
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to load cart", err)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, apperror.New(apperror.CodeBadRequest, "cart is empty")
 	}
-
-	sessionCart, sessionErr := s.carts.GetBySessionCartID(ctx, sessionCartID)
-	if sessionErr != nil {
-		if errors.Is(sessionErr, gorm.ErrRecordNotFound) {
-			return nil, apperror.New(apperror.CodeBadRequest, "cart is empty")
-		}
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to load cart", sessionErr)
+	if err != nil {
+		return nil, err
 	}
-	sessionCart.UserID = &userID
-	if saveErr := s.carts.Update(ctx, sessionCart); saveErr != nil {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to assign cart", saveErr)
+	cart.UserID = &userID
+	if cart.SessionCartID == "" {
+		cart.SessionCartID = sessionCartID
 	}
-	return sessionCart, nil
+	return &cart, nil
 }
 
 func toOrderItems(orderID string, items []valueobject.CartItem) []model.OrderItem {
@@ -245,6 +234,7 @@ func toOrderItems(orderID string, items []valueobject.CartItem) []model.OrderIte
 			Image:     item.Image,
 		})
 	}
+	sort.Slice(orderItems, func(i, j int) bool { return orderItems[i].ProductID < orderItems[j].ProductID })
 	return orderItems
 }
 

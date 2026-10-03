@@ -16,3 +16,9 @@ tidy:
 
 fmt:
 	gofmt -w ./cmd ./internal
+
+# Uses a dedicated PostgreSQL database; tests create and remove isolated schemas.
+.PHONY: test-integration
+test-integration:
+	@test -n "$(TEST_DATABASE_DSN)" || (echo 'Set TEST_DATABASE_DSN to a dedicated PostgreSQL test database'; exit 1)
+	go test -race -count=1 ./...
