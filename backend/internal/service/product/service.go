@@ -115,6 +115,10 @@ func (s *Service) Update(ctx context.Context, productID string, input dto.Upsert
 	product.CreatedAt = existing.CreatedAt
 
 	if err := s.products.Update(ctx, product); err != nil {
+		var appErr *apperror.Error
+		if errors.As(err, &appErr) {
+			return nil, appErr
+		}
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to update product", err)
 	}
 

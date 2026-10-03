@@ -12,7 +12,7 @@ import (
 	"mini-store-go/backend/internal/apperror"
 	"mini-store-go/backend/internal/domain/model"
 	"mini-store-go/backend/internal/domain/valueobject"
-	"mini-store-go/backend/internal/infra/rediscache"
+	"mini-store-go/backend/internal/infra/inventory"
 	"mini-store-go/backend/internal/repository"
 )
 
@@ -24,16 +24,16 @@ const (
 )
 
 type Service struct {
-	carts      repository.CartRepository
-	products   repository.ProductRepository
-	stockStore *rediscache.StockStore
+	carts    repository.CartRepository
+	products repository.ProductRepository
+	db       *gorm.DB
 }
 
-func NewService(carts repository.CartRepository, products repository.ProductRepository, stockStore *rediscache.StockStore) *Service {
+func NewService(carts repository.CartRepository, products repository.ProductRepository, db *gorm.DB) *Service {
 	return &Service{
-		carts:      carts,
-		products:   products,
-		stockStore: stockStore,
+		carts:    carts,
+		products: products,
+		db:       db,
 	}
 }
 
@@ -56,7 +56,10 @@ func (s *Service) AddItem(ctx context.Context, sessionCartID string, userID *str
 		}
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to load product", err)
 	}
-	availableStock := s.availableStock(ctx, product)
+	availableStock, err := inventory.Available(s.db.WithContext(ctx), product.ID, "")
+	if err != nil {
+		return nil, apperror.Wrap(apperror.CodeInternal, "failed to load available stock", err)
+	}
 
 	cart, err := s.resolveCart(ctx, sessionCartID, userID)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -100,19 +103,6 @@ func (s *Service) AddItem(ctx context.Context, sessionCartID string, userID *str
 		return nil, err
 	}
 	return cart, nil
-}
-
-func (s *Service) availableStock(ctx context.Context, product *model.Product) int {
-	if s.stockStore == nil || !s.stockStore.Enabled() {
-		return product.Stock
-	}
-
-	_ = s.stockStore.PrimeStocks(ctx, map[string]int{product.ID: product.Stock})
-	stock, ok, err := s.stockStore.Available(ctx, product.ID)
-	if err != nil || !ok {
-		return product.Stock
-	}
-	return stock
 }
 
 func (s *Service) RemoveItem(ctx context.Context, sessionCartID string, userID *string, productID string) (*model.Cart, error) {

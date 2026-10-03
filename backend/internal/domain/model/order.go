@@ -18,11 +18,11 @@ type Order struct {
 	ShippingPrice   decimal.Decimal                               `gorm:"column:shippingPrice;type:numeric(12,2);not null"`
 	TaxPrice        decimal.Decimal                               `gorm:"column:taxPrice;type:numeric(12,2);not null"`
 	TotalPrice      decimal.Decimal                               `gorm:"column:totalPrice;type:numeric(12,2);not null"`
-	IsPaid          bool                                          `gorm:"column:isPaid;not null;default:false"`
+	IsPaid          bool                                          `gorm:"column:isPaid;not null;default:false;index:order_reservation_idx,priority:1"`
 	PaidAt          *time.Time                                    `gorm:"column:paidAt"`
 	IsDelivered     bool                                          `gorm:"column:isDelivered;not null;default:false"`
 	DeliveredAt     *time.Time                                    `gorm:"column:deliveredAt"`
-	CreatedAt       time.Time                                     `gorm:"column:createdAt;autoCreateTime"`
+	CreatedAt       time.Time                                     `gorm:"column:createdAt;autoCreateTime;index:order_reservation_idx,priority:2"`
 
 	User       User        `gorm:"foreignKey:UserID;references:ID"`
 	OrderItems []OrderItem `gorm:"foreignKey:OrderID;references:ID"`
@@ -34,7 +34,7 @@ func (Order) TableName() string {
 
 type OrderItem struct {
 	OrderID   string          `gorm:"column:orderId;primaryKey;type:uuid"`
-	ProductID string          `gorm:"column:productId;primaryKey;type:text"`
+	ProductID string          `gorm:"column:productId;primaryKey;type:text;index:order_item_product_idx"`
 	Qty       int             `gorm:"column:qty;not null"`
 	Price     decimal.Decimal `gorm:"column:price;type:numeric(12,2);not null"`
 	Name      string          `gorm:"column:name;type:text;not null"`

@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
-
+	"gorm.io/gorm/clause"
+	"mini-store-go/backend/internal/apperror"
 	"mini-store-go/backend/internal/domain/model"
 	"mini-store-go/backend/internal/dto"
+	"mini-store-go/backend/internal/infra/inventory"
 	"mini-store-go/backend/internal/repository"
 )
 
@@ -106,7 +108,21 @@ func (r *productRepository) Create(ctx context.Context, product *model.Product) 
 }
 
 func (r *productRepository) Update(ctx context.Context, product *model.Product) error {
-	return r.db.WithContext(ctx).Save(product).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.Product
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", product.ID).Error; err != nil {
+			return err
+		}
+		available, err := inventory.Available(tx, product.ID, "")
+		if err != nil {
+			return err
+		}
+		reserved := current.Stock - available
+		if product.Stock < reserved {
+			return apperror.New(apperror.CodeConflict, "stock cannot be less than active reservations")
+		}
+		return tx.Save(product).Error
+	})
 }
 
 func (r *productRepository) Delete(ctx context.Context, id string) error {

@@ -15,33 +15,18 @@ import (
 	"mini-store-go/backend/internal/domain/model"
 	"mini-store-go/backend/internal/domain/valueobject"
 	"mini-store-go/backend/internal/dto"
-	"mini-store-go/backend/internal/infra/rediscache"
+	"mini-store-go/backend/internal/infra/inventory"
 	"mini-store-go/backend/internal/repository"
 )
 
-const (
-	reservationTTL          = 15 * time.Minute
-	reservationCleanupLimit = 100
-)
-
 type Service struct {
-	db         *gorm.DB
-	orders     repository.OrderRepository
-	carts      repository.CartRepository
-	users      repository.UserRepository
-	products   repository.ProductRepository
-	stockStore *rediscache.StockStore
+	db     *gorm.DB
+	orders repository.OrderRepository
+	users  repository.UserRepository
 }
 
-func NewService(db *gorm.DB, orders repository.OrderRepository, carts repository.CartRepository, users repository.UserRepository, products repository.ProductRepository, stockStore *rediscache.StockStore) *Service {
-	return &Service{
-		db:         db,
-		orders:     orders,
-		carts:      carts,
-		users:      users,
-		products:   products,
-		stockStore: stockStore,
-	}
+func NewService(db *gorm.DB, orders repository.OrderRepository, users repository.UserRepository) *Service {
+	return &Service{db: db, orders: orders, users: users}
 }
 
 func (s *Service) Create(ctx context.Context, userID string, sessionCartID string) (*model.Order, error) {
@@ -54,7 +39,6 @@ func (s *Service) Create(ctx context.Context, userID string, sessionCartID strin
 	}
 
 	var order *model.Order
-	reserved := false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		cart, err := s.loadCheckoutCart(tx, userID, sessionCartID)
 		if err != nil {
@@ -73,11 +57,13 @@ func (s *Service) Create(ctx context.Context, userID string, sessionCartID strin
 			ID: uuid.NewString(), UserID: user.ID, ShippingAddress: user.Address,
 			PaymentMethod: *user.PaymentMethod, ItemsPrice: cart.ItemsPrice,
 			ShippingPrice: cart.ShippingPrice, TaxPrice: cart.TaxPrice,
-			TotalPrice: cart.TotalPrice, CreatedAt: time.Now().UTC(),
+			TotalPrice: cart.TotalPrice,
 		}
 		order.OrderItems = toOrderItems(order.ID, cart.Items.Data)
-		reserved, err = s.reserveStock(ctx, order.ID, cart.Items.Data)
-		if err != nil {
+		if err := inventory.Check(tx, orderQuantities(order.OrderItems), ""); err != nil {
+			return err
+		}
+		if err := tx.Raw("SELECT statement_timestamp()").Scan(&order.CreatedAt).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(order).Error; err != nil {
@@ -88,11 +74,6 @@ func (s *Service) Create(ctx context.Context, userID string, sessionCartID strin
 		return tx.Save(cart).Error
 	})
 	if err != nil {
-		if reserved {
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			_ = s.stockStore.Release(cleanupCtx, order.ID)
-		}
 		var appErr *apperror.Error
 		if errors.As(err, &appErr) {
 			return nil, appErr
@@ -148,6 +129,10 @@ func (s *Service) MarkPaid(ctx context.Context, orderID string) (*model.Order, e
 			return err
 		}
 
+		if err := inventory.Check(tx, orderQuantities(order.OrderItems), order.ID); err != nil {
+			return err
+		}
+
 		for _, item := range order.OrderItems {
 			result := tx.Model(&model.Product{}).
 				Where("id = ? AND stock >= ?", item.ProductID, item.Qty).
@@ -168,13 +153,10 @@ func (s *Service) MarkPaid(ctx context.Context, orderID string) (*model.Order, e
 	if err != nil {
 		var appErr *apperror.Error
 		if errors.As(err, &appErr) {
-			_ = s.releaseStockReservation(ctx, orderID)
 			return nil, appErr
 		}
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to mark order paid", err)
 	}
-
-	_ = s.confirmStockReservation(ctx, orderID)
 
 	return s.GetByID(ctx, orderID)
 }
@@ -238,116 +220,12 @@ func toOrderItems(orderID string, items []valueobject.CartItem) []model.OrderIte
 	return orderItems
 }
 
-func (s *Service) reserveStock(ctx context.Context, orderID string, items []valueobject.CartItem) (bool, error) {
-	if s.stockStore == nil || !s.stockStore.Enabled() {
-		return false, nil
-	}
-
-	stockItems := toStockItems(items)
-	if len(stockItems) == 0 {
-		return false, nil
-	}
-
-	_ = s.releaseExpiredReservations(ctx)
-
-	if err := s.primeStockCache(ctx, stockItems); err != nil {
-		return false, nil
-	}
-
-	err := s.stockStore.Reserve(ctx, orderID, stockItems, reservationTTL)
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, rediscache.ErrStockCacheMiss) {
-		if primeErr := s.primeStockCache(ctx, stockItems); primeErr != nil {
-			return false, nil
-		}
-		if retryErr := s.stockStore.Reserve(ctx, orderID, stockItems, reservationTTL); retryErr == nil {
-			return true, nil
-		} else {
-			err = retryErr
-		}
-	}
-	if errors.Is(err, rediscache.ErrInsufficient) {
-		return false, apperror.New(apperror.CodeOutOfStock, "not enough stock")
-	}
-
-	return false, nil
-}
-
-func (s *Service) primeStockCache(ctx context.Context, items []rediscache.StockItem) error {
-	stocks := make(map[string]int, len(items))
+func orderQuantities(items []model.OrderItem) map[string]int {
+	quantities := make(map[string]int, len(items))
 	for _, item := range items {
-		if _, exists := stocks[item.ProductID]; exists {
-			continue
-		}
-		product, err := s.products.GetByID(ctx, item.ProductID)
-		if err != nil {
-			return err
-		}
-		stocks[item.ProductID] = product.Stock
+		quantities[item.ProductID] += item.Qty
 	}
-	return s.stockStore.PrimeStocks(ctx, stocks)
-}
-
-func (s *Service) releaseStockReservation(ctx context.Context, orderID string) error {
-	if s.stockStore == nil || !s.stockStore.Enabled() {
-		return nil
-	}
-	return s.stockStore.Release(ctx, orderID)
-}
-
-func (s *Service) confirmStockReservation(ctx context.Context, orderID string) error {
-	if s.stockStore == nil || !s.stockStore.Enabled() {
-		return nil
-	}
-	return s.stockStore.Confirm(ctx, orderID)
-}
-
-func (s *Service) releaseExpiredReservations(ctx context.Context) error {
-	if s.stockStore == nil || !s.stockStore.Enabled() {
-		return nil
-	}
-
-	orderIDs, err := s.stockStore.ExpiredReservations(ctx, time.Now().UTC(), reservationCleanupLimit)
-	if err != nil {
-		return err
-	}
-
-	for _, orderID := range orderIDs {
-		order, err := s.orders.GetByID(ctx, orderID)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				_ = s.stockStore.Release(ctx, orderID)
-			}
-			continue
-		}
-		if order.IsPaid {
-			_ = s.stockStore.Confirm(ctx, orderID)
-			continue
-		}
-		_ = s.stockStore.Release(ctx, orderID)
-	}
-	return nil
-}
-
-func toStockItems(items []valueobject.CartItem) []rediscache.StockItem {
-	merged := make(map[string]int, len(items))
-	for _, item := range items {
-		if item.Qty <= 0 {
-			continue
-		}
-		merged[item.ProductID] += item.Qty
-	}
-
-	stockItems := make([]rediscache.StockItem, 0, len(merged))
-	for productID, qty := range merged {
-		stockItems = append(stockItems, rediscache.StockItem{
-			ProductID: productID,
-			Qty:       qty,
-		})
-	}
-	return stockItems
+	return quantities
 }
 
 func isCompleteAddress(address valueobject.ShippingAddress) bool {

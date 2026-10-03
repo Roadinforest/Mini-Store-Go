@@ -15,7 +15,6 @@ import (
 	"mini-store-go/backend/internal/config"
 	"mini-store-go/backend/internal/http/handler"
 	"mini-store-go/backend/internal/http/middleware"
-	"mini-store-go/backend/internal/infra/rediscache"
 	gormrepo "mini-store-go/backend/internal/repository/gorm"
 	searchsvc "mini-store-go/backend/internal/search"
 	adminservice "mini-store-go/backend/internal/service/admin"
@@ -47,7 +46,6 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 	engine.GET("/healthz", healthHandler.Healthz)
 
 	store := gormrepo.NewStore(db)
-	stockStore := rediscache.NewStockStore(redisClient)
 	validator := validation.New()
 	tokenManager := auth.NewManager(cfg.Auth)
 	passwordHasher := auth.NewPasswordHasher(cfg.Auth.PasswordSecret)
@@ -70,11 +68,11 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 	)
 	cartHandler := handler.NewCartHandler(
 		validator,
-		cartservice.NewService(store.Carts, store.Products, stockStore),
+		cartservice.NewService(store.Carts, store.Products, db),
 	)
 	orderHandler := handler.NewOrderHandler(
 		validator,
-		orderservice.NewService(db, store.Orders, store.Carts, store.Users, store.Products, stockStore),
+		orderservice.NewService(db, store.Orders, store.Users),
 	)
 	adminHandler := handler.NewAdminHandler(
 		validator,
