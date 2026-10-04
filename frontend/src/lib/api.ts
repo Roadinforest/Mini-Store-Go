@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { AdminOverview, Cart, CartItem, Order, Product, ProductDraft, Review, ShippingAddress, User } from "@/lib/types";
 
 const API_BASE_URL = import.meta.env.DEV
@@ -16,150 +17,74 @@ export type ChatMessage = {
   }>;
 };
 
-export type ChatStreamChunk = {
-  type: "partial" | "complete" | "navigation" | "error" | "tool_call" | "thinking";
-  content?: string;
-  url?: string;
-  message?: string;
-  toolName?: string;
-};
 
-type ApiEnvelope<T> = {
-  code: string;
-  message: string;
-  data?: T;
-  details?: unknown;
-};
+const addressSchema = z.object({
+  full_name: z.string(), street_address: z.string(), city: z.string(), postal_code: z.string(), country: z.string(),
+});
+const apiUserSchema = z.object({
+  id: z.string(), name: z.string(), email: z.string(), role: z.enum(["admin", "user"]),
+  payment_method: z.string().nullish(), created_at: z.string().optional(), address: addressSchema.nullish(),
+});
+const apiProductSchema = z.object({
+  id: z.string(), name: z.string(), slug: z.string(), category: z.string(),
+  images: z.array(z.string()).nullable().transform(value => value ?? []),
+  brand: z.string(), description: z.string(), stock: z.number().int().nonnegative(),
+  price: z.number().nonnegative(), rating: z.number(), num_reviews: z.number().int().nonnegative(),
+  is_featured: z.boolean(), banner: z.string().nullish(), created_at: z.string(),
+});
+const apiReviewSchema = z.object({
+  id: z.string(), user_id: z.string(), product_id: z.string(), rating: z.number(),
+  title: z.string(), description: z.string(), is_verified_purchase: z.boolean(), created_at: z.string(),
+  user: z.object({id: z.string(), name: z.string()}).optional(),
+  product: z.object({id: z.string(), name: z.string(), slug: z.string(), image: z.string().optional()}).optional(),
+});
+const apiCartItemSchema = z.object({
+  product_id: z.string(), name: z.string(), slug: z.string(), qty: z.number().int().positive(), image: z.string(), price: z.number(),
+});
+const pricesSchema = z.object({items_price: z.number(), shipping_price: z.number(), tax_price: z.number(), total_price: z.number()});
+const apiCartSchema = pricesSchema.extend({session_cart_id: z.string(), items: z.array(apiCartItemSchema)});
+const apiOrderSchema = pricesSchema.extend({
+  id: z.string(), user_id: z.string(), shipping_address: addressSchema, payment_method: z.string(),
+  is_paid: z.boolean(), paid_at: z.string().nullish(), is_delivered: z.boolean(), delivered_at: z.string().nullish(),
+  created_at: z.string(), order_items: z.array(apiCartItemSchema),
+  user: z.object({id: z.string(), name: z.string(), email: z.string()}).optional(),
+});
+const apiPageMetaSchema = z.object({page: z.number().int().positive(), limit: z.number().int().positive(), total: z.number().int().nonnegative(), total_pages: z.number().int().nonnegative()});
+function paged<S extends z.ZodType>(item: S) { return z.object({items: z.array(item), meta: apiPageMetaSchema}); }
+const apiAdminOverviewSchema = z.object({order_count: z.number(), product_count: z.number(), user_count: z.number(), total_sales: z.number()});
+const envelopeSchema = z.object({code: z.string(), message: z.string(), data: z.unknown().optional(), details: z.unknown().optional()});
+const chatSchema = z.object({
+  role: z.enum(["assistant", "user", "system"]), content: z.string(), url: z.string().optional(),
+  messageType: z.enum(["normal", "thinking", "tool_call", "navigation"]).optional(), toolName: z.string().optional(),
+  toolCalls: z.array(z.object({toolName: z.string(), content: z.string()})).optional(),
+});
+export const chatStreamSchema = z.object({
+  type: z.enum(["partial", "complete", "navigation", "error", "tool_call", "tool_result", "thinking"]),
+  content: z.string().optional(), url: z.string().optional(), message: z.string().optional(), toolName: z.string().optional(),
+});
+export type ChatStreamChunk = z.infer<typeof chatStreamSchema>;
+type ApiUser = z.infer<typeof apiUserSchema>;
+type ApiProduct = z.infer<typeof apiProductSchema>;
+type ApiReview = z.infer<typeof apiReviewSchema>;
+type ApiCartItem = z.infer<typeof apiCartItemSchema>;
+type ApiCart = z.infer<typeof apiCartSchema>;
+type ApiOrder = z.infer<typeof apiOrderSchema>;
+type ApiAdminOverview = z.infer<typeof apiAdminOverviewSchema>;
+type ApiPaged<T> = {items: T[]; meta: z.infer<typeof apiPageMetaSchema>};
+type ApiCategoryCount = {category: string; count: number};
 
-type ApiUser = {
-  id: string;
-  name: string;
-  email: string;
-  role: "admin" | "user";
-  image?: string | null;
-  payment_method?: string | null;
-  created_at?: string;
-  address?: {
-    full_name: string;
-    street_address: string;
-    city: string;
-    postal_code: string;
-    country: string;
-  } | null;
-};
-
-type ApiProduct = {
-  id: string;
-  name: string;
-  slug: string;
-  category: string;
-  images: string[];
-  brand: string;
-  description: string;
-  stock: number;
-  price: number;
-  rating: number;
-  num_reviews: number;
-  is_featured: boolean;
-  banner?: string | null;
-  created_at: string;
-};
-
-type ApiReview = {
-  id: string;
-  user_id: string;
-  product_id: string;
-  rating: number;
-  title: string;
-  description: string;
-  is_verified_purchase: boolean;
-  created_at: string;
-  user?: {
-    id: string;
-    name: string;
-  };
-  product?: {
-    id: string;
-    name: string;
-    slug: string;
-    image?: string;
-  };
-};
-
-type ApiCategoryCount = {
-  category: string;
-  count: number;
-};
-
-type ApiCartItem = {
-  product_id: string;
-  name: string;
-  slug: string;
-  qty: number;
-  image: string;
-  price: number;
-};
-
-type ApiCart = {
-  id?: string;
-  user_id?: string | null;
-  session_cart_id: string;
-  items: ApiCartItem[];
-  items_price: number;
-  shipping_price: number;
-  tax_price: number;
-  total_price: number;
-  created_at?: string;
-};
-
-type ApiOrderItem = ApiCartItem;
-
-type ApiOrder = {
-  id: string;
-  user_id: string;
-  shipping_address: {
-    full_name: string;
-    street_address: string;
-    city: string;
-    postal_code: string;
-    country: string;
-  };
-  payment_method: string;
-  items_price: number;
-  shipping_price: number;
-  tax_price: number;
-  total_price: number;
-  is_paid: boolean;
-  paid_at?: string | null;
-  is_delivered: boolean;
-  delivered_at?: string | null;
-  created_at: string;
-  order_items: ApiOrderItem[];
-  user?: {
-    id: string;
-    name: string;
-    email: string;
-  };
-};
-
-type ApiPageMeta = {
-  page: number;
-  limit: number;
-  total: number;
-  total_pages: number;
-};
-
-type ApiAdminOverview = {
-  order_count: number;
-  product_count: number;
-  user_count: number;
-  total_sales: number;
-};
-
-type ApiPaged<T> = {
-  items: T[];
-  meta: ApiPageMeta;
-};
+const userSchema = apiUserSchema.transform(toUser);
+const productSchema = apiProductSchema.transform(toProduct);
+const reviewSchema = apiReviewSchema.transform(toReview);
+const cartSchema = apiCartSchema.transform(toCart);
+const orderSchema = apiOrderSchema.transform(toOrder);
+const productsPageSchema = paged(apiProductSchema).transform(toCatalogPage);
+const usersPageSchema = paged(apiUserSchema).transform(toUserCatalogPage);
+const ordersPageSchema = paged(apiOrderSchema).transform(toOrderCatalogPage);
+const overviewSchema = apiAdminOverviewSchema.transform(toAdminOverview);
+const categoriesSchema = z.array(z.object({category: z.string(), count: z.number().int().nonnegative()}));
+const deletedSchema = z.object({deleted: z.boolean()});
+const signOutSchema = z.object({signed_out: z.boolean()});
 
 export type CatalogPage<T> = {
   items: T[];
@@ -182,15 +107,17 @@ type RequestOptions = {
   skipAuthRefresh?: boolean;
 };
 
-export async function sendChat(messages: ChatMessage[]): Promise<ApiResult<ChatMessage>> {
-  return request<ChatMessage>("/ai/chat", {
+export async function sendChat(messages: ChatMessage[], signal?: AbortSignal): Promise<ApiResult<ChatMessage>> {
+  return request(chatSchema, "/ai/chat", {
+    signal,
     method: "POST",
     body: JSON.stringify({ messages }),
   });
 }
 
-export async function createChatStream(messages: ChatMessage[]): Promise<Response> {
+export async function createChatStream(messages: ChatMessage[], signal?: AbortSignal): Promise<Response> {
   return fetch(`${API_BASE_URL}/ai/chat/stream`, {
+    signal,
     method: "POST",
     credentials: "include",
     headers: {
@@ -201,7 +128,7 @@ export async function createChatStream(messages: ChatMessage[]): Promise<Respons
 }
 
 export async function signIn(payload: { email: string; password: string }): Promise<ApiResult<User>> {
-  return request<User>("/auth/sign-in", {
+  return request(userSchema, "/auth/sign-in", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -213,26 +140,26 @@ export async function signUp(payload: {
   password: string;
   confirm_password: string;
 }): Promise<ApiResult<User>> {
-  return request<User>("/auth/sign-up", {
+  return request(userSchema, "/auth/sign-up", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export async function signOut(): Promise<ApiResult<{ signed_out: boolean }>> {
-  return request<{ signed_out: boolean }>("/auth/sign-out", {
+  return request(signOutSchema, "/auth/sign-out", {
     method: "POST",
   });
 }
 
 export async function getCurrentUser(): Promise<ApiResult<User>> {
-  return request<User>("/auth/me", {
+  return request(userSchema, "/auth/me", {
     method: "GET",
   });
 }
 
 export async function refreshAuth(): Promise<ApiResult<User>> {
-  return request<User>("/auth/refresh", {
+  return request(userSchema, "/auth/refresh", {
     method: "POST",
   }, { skipAuthRefresh: true });
 }
@@ -241,14 +168,14 @@ export async function updateProfile(payload: {
   name: string;
   email: string;
 }): Promise<ApiResult<User>> {
-  return request<User>("/users/me/profile", {
+  return request(userSchema, "/users/me/profile", {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 }
 
 export async function updateAddress(payload: ShippingAddress): Promise<ApiResult<User>> {
-  return request<User>("/users/me/address", {
+  return request(userSchema, "/users/me/address", {
     method: "PUT",
     body: JSON.stringify(payload),
   });
@@ -257,7 +184,7 @@ export async function updateAddress(payload: ShippingAddress): Promise<ApiResult
 export async function updatePaymentMethod(payload: {
   type: string;
 }): Promise<ApiResult<User>> {
-  return request<User>("/users/me/payment-method", {
+  return request(userSchema, "/users/me/payment-method", {
     method: "PUT",
     body: JSON.stringify(payload),
   });
@@ -278,37 +205,37 @@ export async function getProducts(params: {
       search.set(key, String(value));
     }
   }
-  return request<CatalogPage<Product>>(`/products?${search.toString()}`, {
+  return request(productsPageSchema, `/products?${search.toString()}`, {
     method: "GET",
   });
 }
 
 export async function getLatestProducts(limit = 6): Promise<ApiResult<Product[]>> {
-  return request<Product[]>(`/products/latest?limit=${limit}`, { method: "GET" });
+  return request(z.array(productSchema), `/products/latest?limit=${limit}`, { method: "GET" });
 }
 
 export async function getFeaturedProducts(limit = 4): Promise<ApiResult<Product[]>> {
-  return request<Product[]>(`/products/featured?limit=${limit}`, { method: "GET" });
+  return request(z.array(productSchema), `/products/featured?limit=${limit}`, { method: "GET" });
 }
 
 export async function getProductCategories(): Promise<ApiResult<ApiCategoryCount[]>> {
-  return request<ApiCategoryCount[]>("/products/categories", { method: "GET" });
+  return request(categoriesSchema, "/products/categories", { method: "GET" });
 }
 
 export async function getProductBySlug(slug: string): Promise<ApiResult<Product>> {
-  return request<Product>(`/products/slug/${slug}`, { method: "GET" });
+  return request(productSchema, `/products/slug/${slug}`, { method: "GET" });
 }
 
 export async function getProductByID(id: string): Promise<ApiResult<Product>> {
-  return request<Product>(`/products/${id}`, { method: "GET" });
+  return request(productSchema, `/products/${id}`, { method: "GET" });
 }
 
 export async function getProductReviews(productID: string): Promise<ApiResult<Review[]>> {
-  return request<Review[]>(`/reviews/product/${productID}`, { method: "GET" });
+  return request(z.array(reviewSchema), `/reviews/product/${productID}`, { method: "GET" });
 }
 
 export async function getMyReview(productID: string): Promise<ApiResult<Review>> {
-  return request<Review>(`/reviews/mine?product_id=${encodeURIComponent(productID)}`, { method: "GET" });
+  return request(reviewSchema, `/reviews/mine?product_id=${encodeURIComponent(productID)}`, { method: "GET" });
 }
 
 export async function upsertReview(payload: {
@@ -317,7 +244,7 @@ export async function upsertReview(payload: {
   title: string;
   description: string;
 }): Promise<ApiResult<Review>> {
-  return request<Review>("/reviews", {
+  return request(reviewSchema, "/reviews", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -328,11 +255,11 @@ export async function getAdminProducts(params: { page?: number; limit?: number }
   if (params.page) search.set("page", String(params.page));
   if (params.limit) search.set("limit", String(params.limit));
   const query = search.toString();
-  return request<CatalogPage<Product>>(`/admin/products${query ? `?${query}` : ""}`, { method: "GET" });
+  return request(productsPageSchema, `/admin/products${query ? `?${query}` : ""}`, { method: "GET" });
 }
 
 export async function getAdminOverview(): Promise<ApiResult<AdminOverview>> {
-  return request<AdminOverview>("/admin/overview", { method: "GET" });
+  return request(overviewSchema, "/admin/overview", { method: "GET" });
 }
 
 export async function getAdminUsers(params: { page?: number; limit?: number; q?: string } = {}): Promise<ApiResult<CatalogPage<User>>> {
@@ -341,7 +268,7 @@ export async function getAdminUsers(params: { page?: number; limit?: number; q?:
   if (params.limit) search.set("limit", String(params.limit));
   if (params.q) search.set("q", params.q);
   const query = search.toString();
-  return request<CatalogPage<User>>(`/admin/users${query ? `?${query}` : ""}`, { method: "GET" });
+  return request(usersPageSchema, `/admin/users${query ? `?${query}` : ""}`, { method: "GET" });
 }
 
 export async function updateAdminUser(userID: string, payload: {
@@ -349,75 +276,75 @@ export async function updateAdminUser(userID: string, payload: {
   email: string;
   role: "admin" | "user";
 }): Promise<ApiResult<User>> {
-  return request<User>(`/admin/users/${userID}`, {
+  return request(userSchema, `/admin/users/${userID}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 }
 
 export async function deleteAdminUser(userID: string): Promise<ApiResult<{ deleted: boolean }>> {
-  return request<{ deleted: boolean }>(`/admin/users/${userID}`, {
+  return request(deletedSchema, `/admin/users/${userID}`, {
     method: "DELETE",
   });
 }
 
 export async function createProduct(payload: ProductDraft): Promise<ApiResult<Product>> {
-  return request<Product>("/admin/products", {
+  return request(productSchema, "/admin/products", {
     method: "POST",
     body: JSON.stringify(toProductPayload(payload)),
   });
 }
 
 export async function deleteProduct(productID: string): Promise<ApiResult<{ deleted: boolean }>> {
-  return request<{ deleted: boolean }>(`/admin/products/${productID}`, {
+  return request(deletedSchema, `/admin/products/${productID}`, {
     method: "DELETE",
   });
 }
 
 export async function getCart(): Promise<ApiResult<Cart>> {
-  return request<Cart>("/cart", { method: "GET" });
+  return request(cartSchema, "/cart", { method: "GET" });
 }
 
 export async function addCartItem(productID: string): Promise<ApiResult<Cart>> {
-  return request<Cart>("/cart/items", {
+  return request(cartSchema, "/cart/items", {
     method: "POST",
     body: JSON.stringify({ product_id: productID }),
   });
 }
 
 export async function removeCartItem(productID: string): Promise<ApiResult<Cart>> {
-  return request<Cart>(`/cart/items/${productID}`, {
+  return request(cartSchema, `/cart/items/${productID}`, {
     method: "DELETE",
   });
 }
 
 export async function createOrder(): Promise<ApiResult<Order>> {
-  return request<Order>("/orders", {
+  return request(orderSchema, "/orders", {
     method: "POST",
   });
 }
 
 export async function getMyOrders(): Promise<ApiResult<CatalogPage<Order>>> {
-  return request<CatalogPage<Order>>("/orders/mine", { method: "GET" });
+  return request(ordersPageSchema, "/orders/mine", { method: "GET" });
 }
 
 export async function getOrderByID(orderID: string): Promise<ApiResult<Order>> {
-  return request<Order>(`/orders/${orderID}`, { method: "GET" });
+  return request(orderSchema, `/orders/${orderID}`, { method: "GET" });
 }
 
 export async function getAdminOrders(): Promise<ApiResult<CatalogPage<Order>>> {
-  return request<CatalogPage<Order>>("/admin/orders", { method: "GET" });
+  return request(ordersPageSchema, "/admin/orders", { method: "GET" });
 }
 
 export async function markOrderPaid(orderID: string): Promise<ApiResult<Order>> {
-  return request<Order>(`/admin/orders/${orderID}/pay`, { method: "PUT" });
+  return request(orderSchema, `/admin/orders/${orderID}/pay`, { method: "PUT" });
 }
 
 export async function markOrderDelivered(orderID: string): Promise<ApiResult<Order>> {
-  return request<Order>(`/admin/orders/${orderID}/deliver`, { method: "PUT" });
+  return request(orderSchema, `/admin/orders/${orderID}/deliver`, { method: "PUT" });
 }
 
-async function request<T>(path: string, init: RequestInit, options: RequestOptions = {}): Promise<ApiResult<T>> {
+async function request<S extends z.ZodType>(schema: S, path: string, init: RequestInit, options: RequestOptions = {}): Promise<ApiResult<z.output<S>>> {
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
@@ -428,12 +355,12 @@ async function request<T>(path: string, init: RequestInit, options: RequestOptio
       },
     });
 
-    const payload = (await response.json()) as ApiEnvelope<unknown>;
+    const payload = envelopeSchema.parse(await response.json());
     if (!response.ok) {
       if (response.status === 401 && shouldRefreshAuth(path, options)) {
-        const refreshResult = await refreshAuth();
+        const refreshResult = await refreshOnce();
         if (refreshResult.success) {
-          return request<T>(path, init, { ...options, skipAuthRefresh: true });
+          return request(schema, path, init, { ...options, skipAuthRefresh: true });
         }
       }
 
@@ -444,15 +371,16 @@ async function request<T>(path: string, init: RequestInit, options: RequestOptio
       };
     }
 
+    if (payload.code !== "OK") return { success: false, message: payload.message || "Request failed.", details: payload.details };
     return {
       success: true,
       message: payload.message || "success",
-      data: transformData(payload.data) as T,
+      data: schema.parse(payload.data),
     };
   } catch (error) {
     return {
       success: false,
-      message: error instanceof Error ? error.message : "Network error.",
+      message: error instanceof z.ZodError ? "Invalid API response." : error instanceof Error ? error.message : "Network error.",
     };
   }
 }
@@ -462,69 +390,10 @@ function shouldRefreshAuth(path: string, options: RequestOptions): boolean {
   return !["/auth/sign-in", "/auth/sign-up", "/auth/sign-out", "/auth/refresh"].includes(path);
 }
 
-function transformData(value: unknown): unknown {
-  if (isApiAdminOverview(value)) return toAdminOverview(value);
-  if (isApiUser(value)) return toUser(value);
-  if (isApiProduct(value)) return toProduct(value);
-  if (isApiReview(value)) return toReview(value);
-  if (isApiCart(value)) return toCart(value);
-  if (isApiOrder(value)) return toOrder(value);
-  if (isApiPagedOrders(value)) return toOrderCatalogPage(value);
-  if (isApiPagedUsers(value)) return toUserCatalogPage(value);
-  if (isApiPagedProducts(value)) return toCatalogPage(value);
-  if (Array.isArray(value)) {
-    if (value.every(isApiProduct)) return value.map(toProduct);
-    if (value.every(isApiReview)) return value.map(toReview);
-  }
-  return value;
-}
-
-function isApiUser(value: unknown): value is ApiUser {
-  return Boolean(value) && typeof value === "object" && "id" in (value as Record<string, unknown>) && "email" in (value as Record<string, unknown>);
-}
-
-function isApiAdminOverview(value: unknown): value is ApiAdminOverview {
-  return Boolean(value) && typeof value === "object" && "order_count" in (value as Record<string, unknown>) && "total_sales" in (value as Record<string, unknown>);
-}
-
-function isApiProduct(value: unknown): value is ApiProduct {
-  return Boolean(value) && typeof value === "object" && "slug" in (value as Record<string, unknown>) && "num_reviews" in (value as Record<string, unknown>);
-}
-
-function isApiReview(value: unknown): value is ApiReview {
-  return Boolean(value) && typeof value === "object" && "product_id" in (value as Record<string, unknown>) && "is_verified_purchase" in (value as Record<string, unknown>);
-}
-
-function isApiPagedProducts(value: unknown): value is ApiPaged<ApiProduct> {
-  if (!Boolean(value) || typeof value !== "object" || !("items" in (value as Record<string, unknown>)) || !("meta" in (value as Record<string, unknown>))) {
-    return false;
-  }
-  const items = (value as { items?: unknown[] }).items;
-  return Array.isArray(items) && (items.length === 0 || items.every(isApiProduct));
-}
-
-function isApiPagedUsers(value: unknown): value is ApiPaged<ApiUser> {
-  if (!Boolean(value) || typeof value !== "object" || !("items" in (value as Record<string, unknown>)) || !("meta" in (value as Record<string, unknown>))) {
-    return false;
-  }
-  const items = (value as { items?: unknown[] }).items;
-  return Array.isArray(items) && (items.length === 0 || items.every(isApiUser));
-}
-
-function isApiCart(value: unknown): value is ApiCart {
-  return Boolean(value) && typeof value === "object" && "session_cart_id" in (value as Record<string, unknown>) && "items_price" in (value as Record<string, unknown>);
-}
-
-function isApiOrder(value: unknown): value is ApiOrder {
-  return Boolean(value) && typeof value === "object" && "shipping_address" in (value as Record<string, unknown>) && "order_items" in (value as Record<string, unknown>);
-}
-
-function isApiPagedOrders(value: unknown): value is ApiPaged<ApiOrder> {
-  if (!Boolean(value) || typeof value !== "object" || !("items" in (value as Record<string, unknown>)) || !("meta" in (value as Record<string, unknown>))) {
-    return false;
-  }
-  const items = (value as { items?: unknown[] }).items;
-  return Array.isArray(items) && (items.length === 0 || items.every(isApiOrder));
+let pendingRefresh: Promise<ApiResult<User>> | undefined;
+function refreshOnce(): Promise<ApiResult<User>> {
+  if (!pendingRefresh) pendingRefresh = refreshAuth().finally(() => { pendingRefresh = undefined; });
+  return pendingRefresh;
 }
 
 function toUser(user: ApiUser): User {
@@ -535,7 +404,7 @@ function toUser(user: ApiUser): User {
     role: user.role,
     paymentMethod: user.payment_method ?? undefined,
     address: user.address ? toShippingAddress(user.address) : undefined,
-    createdAt: user.created_at ?? new Date().toISOString(),
+    createdAt: user.created_at ?? "",
   };
 }
 
