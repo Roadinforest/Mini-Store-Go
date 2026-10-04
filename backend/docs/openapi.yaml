@@ -18,10 +18,28 @@ paths:
   /healthz:
     get:
       tags: [Health]
-      summary: Service health check
+      summary: Process liveness check (independent of dependencies)
       responses:
         '200':
           description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /readyz:
+    get:
+      tags: [Health]
+      summary: Dependency readiness check
+      description: Checks PostgreSQL and configured Redis concurrently under a two-second deadline. Unconfigured Redis is optional.
+      responses:
+        '200':
+          description: All configured dependencies respond
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '503':
+          description: A configured dependency is unavailable or timed out; details contains per-service status
           content:
             application/json:
               schema:
@@ -374,6 +392,7 @@ paths:
     post:
       tags: [AI]
       summary: Streaming chat completion over SSE
+      description: Each event contains StreamChunk JSON. Tool calls continue the original conversation. Successful streams terminate with complete or navigation followed by [DONE]; error events indicate failure. The AI timeout covers the entire conversation.
       requestBody:
         required: true
         content:
@@ -387,7 +406,13 @@ paths:
             text/event-stream:
               schema:
                 type: string
-                example: "data: {\"type\":\"partial\",\"content\":\"hello\"}\n\ndata: [DONE]\n\n"
+                example: |
+                  data: {"type":"partial","content":"hello"}
+
+                  data: {"type":"complete","content":"hello"}
+
+                  data: [DONE]
+
   /api/v1/admin/overview:
     get:
       tags: [Admin]
@@ -413,6 +438,21 @@ components:
       in: cookie
       name: mini_store_access_token
   schemas:
+    StreamChunk:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [thinking, tool_call, tool_result, partial, complete, navigation, error]
+        content:
+          type: string
+        toolName:
+          type: string
+        url:
+          type: string
+        message:
+          type: string
     Envelope:
       type: object
       properties:
