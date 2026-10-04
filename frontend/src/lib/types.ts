@@ -106,8 +106,6 @@ export type Order = {
 
 export type ProductDraft = Omit<Product, "id" | "rating" | "numReviews" | "createdAt"> & {
   id?: string;
-  rating?: number;
-  numReviews?: number;
   createdAt?: string;
 };
 

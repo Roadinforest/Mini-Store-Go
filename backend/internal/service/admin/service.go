@@ -52,8 +52,8 @@ func (s *Service) Overview(ctx context.Context) (*Overview, error) {
 	}
 	if err := s.db.WithContext(ctx).
 		Model(&model.Order{}).
-		Select(`COALESCE(SUM("totalPrice"), 0) AS amount`).
-		Where(`"isPaid" = ?`, true).
+		Select(`COALESCE(SUM("shippingPrice" + "taxPrice" + COALESCE((SELECT SUM(i.price * i.qty) FROM "OrderItem" i WHERE i."orderId" = "Order".id), 0)), 0) AS amount`).
+		Where(`"paidAt" IS NOT NULL`).
 		Scan(&totalSales).Error; err != nil {
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to sum sales", err)
 	}

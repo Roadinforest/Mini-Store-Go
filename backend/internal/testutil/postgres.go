@@ -17,6 +17,16 @@ import (
 
 func Postgres(t *testing.T) *gorm.DB {
 	t.Helper()
+	db := EmptyPostgres(t)
+	if err := db.AutoMigrate(model.All()...); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+// EmptyPostgres isolates migration tests without applying the current schema.
+func EmptyPostgres(t *testing.T) *gorm.DB {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("set TEST_DATABASE_DSN to run PostgreSQL integration tests")
@@ -44,9 +54,6 @@ func Postgres(t *testing.T) *gorm.DB {
 	t.Cleanup(func() { sqlDB.Close() })
 	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.AutoMigrate(model.All()...); err != nil {
 		t.Fatal(err)
 	}
 	return db

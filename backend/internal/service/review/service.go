@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"mini-store-go/backend/internal/apperror"
 	"mini-store-go/backend/internal/domain/model"
@@ -67,7 +68,7 @@ func (s *Service) GetByUserAndProduct(ctx context.Context, userID, productID str
 }
 
 func (s *Service) Upsert(ctx context.Context, userID string, input dto.UpsertReviewInput) (*model.Review, error) {
-	product, err := s.products.GetByID(ctx, input.ProductID)
+	_, err := s.products.GetByID(ctx, input.ProductID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperror.New(apperror.CodeNotFound, "product not found")
@@ -77,6 +78,15 @@ func (s *Service) Upsert(ctx context.Context, userID string, input dto.UpsertRev
 
 	var result model.Review
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Serialize upserts and cached aggregate updates for the same product.
+		var lockedProduct model.Product
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&lockedProduct, "id = ?", input.ProductID).Error; err != nil {
+			return err
+		}
+		var purchases int64
+		if err := tx.Model(&model.OrderItem{}).Joins(`JOIN "Order" o ON o.id = "OrderItem"."orderId"`).Where(`o."userId" = ? AND "OrderItem"."productId" = ? AND o."paidAt" IS NOT NULL`, userID, input.ProductID).Count(&purchases).Error; err != nil {
+			return err
+		}
 		var review model.Review
 		loadErr := tx.Where(`"userId" = ? AND "productId" = ?`, userID, input.ProductID).First(&review).Error
 		now := time.Now().UTC()
@@ -93,7 +103,7 @@ func (s *Service) Upsert(ctx context.Context, userID string, input dto.UpsertRev
 				Rating:             input.Rating,
 				Title:              input.Title,
 				Description:        input.Description,
-				IsVerifiedPurchase: true,
+				IsVerifiedPurchase: purchases > 0,
 				CreatedAt:          now,
 			}
 
@@ -101,6 +111,7 @@ func (s *Service) Upsert(ctx context.Context, userID string, input dto.UpsertRev
 				return err
 			}
 		} else {
+			review.IsVerifiedPurchase = purchases > 0
 			review.Rating = input.Rating
 			review.Title = input.Title
 			review.Description = input.Description
@@ -136,11 +147,6 @@ func (s *Service) Upsert(ctx context.Context, userID string, input dto.UpsertRev
 	if err != nil {
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to save review", err)
 	}
-
-	if refreshed, err := s.products.GetByID(ctx, product.ID); err == nil {
-		product = refreshed
-	}
-	_ = product
 
 	return &result, nil
 }

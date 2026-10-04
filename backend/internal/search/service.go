@@ -334,7 +334,7 @@ func (s *Service) productsByID(ctx context.Context, ids []string) (map[string]mo
 		return map[string]model.Product{}, nil
 	}
 	var products []model.Product
-	if err := s.db.WithContext(ctx).Where("id IN ?", ids).Find(&products).Error; err != nil {
+	if err := s.db.WithContext(ctx).Preload("Images", func(tx *gorm.DB) *gorm.DB { return tx.Order("position ASC") }).Where("id IN ?", ids).Find(&products).Error; err != nil {
 		return nil, err
 	}
 	byID := make(map[string]model.Product, len(products))

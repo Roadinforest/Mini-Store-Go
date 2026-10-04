@@ -29,6 +29,8 @@ type UserRepository interface {
 }
 
 type CartRepository interface {
+	// WithCurrent serializes changes to the cart and its relational items.
+	WithCurrent(ctx context.Context, sessionCartID string, userID *string, create bool, change func(*model.Cart) error) (*model.Cart, error)
 	GetByID(ctx context.Context, id string) (*model.Cart, error)
 	GetByUserID(ctx context.Context, userID string) (*model.Cart, error)
 	GetBySessionCartID(ctx context.Context, sessionCartID string) (*model.Cart, error)

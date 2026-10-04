@@ -142,17 +142,6 @@ func buildProductModel(productID string, input dto.UpsertProductInput) (*model.P
 		)
 	}
 
-	rating := decimal.Zero
-	if trimmed := strings.TrimSpace(input.Rating); trimmed != "" {
-		rating, err = decimal.NewFromString(trimmed)
-		if err != nil {
-			return nil, apperror.WithDetails(
-				apperror.New(apperror.CodeValidation, "invalid rating"),
-				map[string]string{"field": "rating"},
-			)
-		}
-	}
-
 	var banner *string
 	if input.Banner != nil {
 		trimmed := strings.TrimSpace(*input.Banner)
@@ -161,18 +150,20 @@ func buildProductModel(productID string, input dto.UpsertProductInput) (*model.P
 		}
 	}
 
+	images := make([]model.ProductImage, 0, len(input.Images))
+	for i, url := range input.Images {
+		images = append(images, model.ProductImage{ProductID: productID, Position: i, URL: url})
+	}
 	return &model.Product{
 		ID:          productID,
 		Name:        strings.TrimSpace(input.Name),
 		Slug:        strings.TrimSpace(input.Slug),
 		Category:    strings.TrimSpace(input.Category),
-		Images:      append([]string(nil), input.Images...),
+		Images:      images,
 		Brand:       strings.TrimSpace(input.Brand),
 		Description: strings.TrimSpace(input.Description),
 		Stock:       input.Stock,
 		Price:       price,
-		Rating:      rating,
-		NumReviews:  input.NumReviews,
 		IsFeatured:  input.IsFeatured,
 		Banner:      banner,
 	}, nil

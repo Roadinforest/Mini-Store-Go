@@ -420,7 +420,7 @@ func formatProductDetails(product model.Product) string {
 		product.NumReviews,
 		product.IsFeatured,
 		product.Brand,
-		strings.Join(product.Images, ", "),
+		strings.Join(product.ImageURLs(), ", "),
 		product.CreatedAt.Format("2006-01-02 15:04:05"),
 	)
 }

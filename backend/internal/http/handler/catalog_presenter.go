@@ -51,7 +51,7 @@ func toProductResponse(product *model.Product) productResponse {
 		Name:        product.Name,
 		Slug:        product.Slug,
 		Category:    product.Category,
-		Images:      append([]string(nil), product.Images...),
+		Images:      product.ImageURLs(),
 		Brand:       product.Brand,
 		Description: product.Description,
 		Stock:       product.Stock,
@@ -102,10 +102,7 @@ func toReviewResponse(review *model.Review) reviewResponse {
 	}
 
 	if review.Product.ID != "" {
-		image := ""
-		if len(review.Product.Images) > 0 {
-			image = review.Product.Images[0]
-		}
+		image := review.Product.FirstImage()
 		item.Product = &struct {
 			ID    string `json:"id"`
 			Name  string `json:"name"`

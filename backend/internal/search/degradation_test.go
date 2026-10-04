@@ -3,7 +3,6 @@ package search
 import (
 	"context"
 	"errors"
-	"github.com/lib/pq"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 	"mini-store-go/backend/internal/config"
@@ -18,7 +17,7 @@ import (
 
 func TestVectorFailureUsesTextSearchAndLogsDegradation(t *testing.T) {
 	db := testutil.Postgres(t)
-	product := model.Product{ID: "p1", Name: "phone", Slug: "phone", Images: pq.StringArray{}}
+	product := model.Product{ID: "p1", Name: "phone", Slug: "phone", Images: []model.ProductImage{}}
 	if err := db.Create(&product).Error; err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,4 @@ type UpsertProductInput struct {
 	IsFeatured  bool     `json:"is_featured"`
 	Banner      *string  `json:"banner"`
 	Price       string   `json:"price" validate:"required"`
-	Rating      string   `json:"rating,omitempty"`
-	NumReviews  int      `json:"num_reviews" validate:"min=0"`
 }

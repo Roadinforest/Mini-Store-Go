@@ -14,13 +14,9 @@ type Order struct {
 	ShippingAddress valueobject.JSON[valueobject.ShippingAddress] `gorm:"column:shippingAddress;type:jsonb;not null"`
 	PaymentMethod   string                                        `gorm:"column:paymentMethod;type:text;not null"`
 	PaymentResult   valueobject.JSON[valueobject.PaymentResult]   `gorm:"column:paymentResult;type:jsonb"`
-	ItemsPrice      decimal.Decimal                               `gorm:"column:itemsPrice;type:numeric(12,2);not null"`
 	ShippingPrice   decimal.Decimal                               `gorm:"column:shippingPrice;type:numeric(12,2);not null"`
 	TaxPrice        decimal.Decimal                               `gorm:"column:taxPrice;type:numeric(12,2);not null"`
-	TotalPrice      decimal.Decimal                               `gorm:"column:totalPrice;type:numeric(12,2);not null"`
-	IsPaid          bool                                          `gorm:"column:isPaid;not null;default:false"`
 	PaidAt          *time.Time                                    `gorm:"column:paidAt"`
-	IsDelivered     bool                                          `gorm:"column:isDelivered;not null;default:false"`
 	DeliveredAt     *time.Time                                    `gorm:"column:deliveredAt"`
 	CreatedAt       time.Time                                     `gorm:"column:createdAt;autoCreateTime"`
 
@@ -47,4 +43,15 @@ type OrderItem struct {
 
 func (OrderItem) TableName() string {
 	return "OrderItem"
+}
+
+func (o Order) IsPaid() bool      { return o.PaidAt != nil }
+func (o Order) IsDelivered() bool { return o.DeliveredAt != nil }
+
+func (o Order) Amounts() valueobject.Amounts {
+	subtotal := decimal.Zero
+	for _, item := range o.OrderItems {
+		subtotal = subtotal.Add(item.Price.Mul(decimal.NewFromInt(int64(item.Qty))))
+	}
+	return valueobject.NewAmounts(subtotal, o.ShippingPrice, o.TaxPrice)
 }

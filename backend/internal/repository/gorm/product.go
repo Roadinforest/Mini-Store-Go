@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"mini-store-go/backend/internal/domain/model"
 	"mini-store-go/backend/internal/dto"
@@ -22,7 +23,7 @@ func NewProductRepository(db *gorm.DB) repository.ProductRepository {
 
 func (r *productRepository) GetByID(ctx context.Context, id string) (*model.Product, error) {
 	var product model.Product
-	if err := r.db.WithContext(ctx).First(&product, "id = ?", id).Error; err != nil {
+	if err := productQuery(r.db.WithContext(ctx)).First(&product, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
 	return &product, nil
@@ -30,7 +31,7 @@ func (r *productRepository) GetByID(ctx context.Context, id string) (*model.Prod
 
 func (r *productRepository) GetBySlug(ctx context.Context, slug string) (*model.Product, error) {
 	var product model.Product
-	if err := r.db.WithContext(ctx).First(&product, "slug = ?", slug).Error; err != nil {
+	if err := productQuery(r.db.WithContext(ctx)).First(&product, "slug = ?", slug).Error; err != nil {
 		return nil, err
 	}
 	return &product, nil
@@ -46,7 +47,7 @@ func (r *productRepository) List(ctx context.Context, filter dto.ProductListFilt
 		Sort:       filter.Sort,
 	}
 
-	query := r.db.WithContext(ctx).Model(&model.Product{})
+	query := productQuery(r.db.WithContext(ctx)).Model(&model.Product{})
 	query = applyProductFilter(query, filter)
 
 	var total int64
@@ -67,7 +68,7 @@ func (r *productRepository) List(ctx context.Context, filter dto.ProductListFilt
 
 func (r *productRepository) ListLatest(ctx context.Context, limit int) ([]model.Product, error) {
 	var products []model.Product
-	if err := r.db.WithContext(ctx).
+	if err := productQuery(r.db.WithContext(ctx)).
 		Order(`"createdAt" DESC`).
 		Limit(limit).
 		Find(&products).Error; err != nil {
@@ -78,7 +79,7 @@ func (r *productRepository) ListLatest(ctx context.Context, limit int) ([]model.
 
 func (r *productRepository) ListFeatured(ctx context.Context, limit int) ([]model.Product, error) {
 	var products []model.Product
-	if err := r.db.WithContext(ctx).
+	if err := productQuery(r.db.WithContext(ctx)).
 		Where(`"isFeatured" = ?`, true).
 		Order(`"createdAt" DESC`).
 		Limit(limit).
@@ -90,7 +91,7 @@ func (r *productRepository) ListFeatured(ctx context.Context, limit int) ([]mode
 
 func (r *productRepository) ListCategories(ctx context.Context) ([]repository.CategoryCount, error) {
 	var counts []repository.CategoryCount
-	if err := r.db.WithContext(ctx).
+	if err := productQuery(r.db.WithContext(ctx)).
 		Model(&model.Product{}).
 		Select("category, COUNT(*) AS count").
 		Group("category").
@@ -106,7 +107,28 @@ func (r *productRepository) Create(ctx context.Context, product *model.Product) 
 }
 
 func (r *productRepository) Update(ctx context.Context, product *model.Product) error {
-	return r.db.WithContext(ctx).Save(product).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.Product
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", product.ID).Error; err != nil {
+			return err
+		}
+		// Review statistics are maintained by the review service, never by admin edits.
+		product.Rating, product.NumReviews = current.Rating, current.NumReviews
+		if err := tx.Omit("Images", "OrderItems", "Reviews").Save(product).Error; err != nil {
+			return err
+		}
+		if err := tx.Where(`"productId" = ?`, product.ID).Delete(&model.ProductImage{}).Error; err != nil {
+			return err
+		}
+		if len(product.Images) == 0 {
+			return nil
+		}
+		for i := range product.Images {
+			product.Images[i].ProductID = product.ID
+			product.Images[i].Position = i
+		}
+		return tx.Create(&product.Images).Error
+	})
 }
 
 func (r *productRepository) Delete(ctx context.Context, id string) error {
@@ -149,4 +171,8 @@ func applyProductSort(query *gorm.DB, sort string) *gorm.DB {
 	default:
 		return query.Order(`"createdAt" DESC`)
 	}
+}
+
+func productQuery(db *gorm.DB) *gorm.DB {
+	return db.Preload("Images", func(tx *gorm.DB) *gorm.DB { return tx.Order("position ASC") })
 }

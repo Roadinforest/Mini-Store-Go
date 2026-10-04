@@ -59,7 +59,7 @@ func (r *reviewRepository) ListByUserID(ctx context.Context, userID string, page
 
 	var reviews []model.Review
 	if err := query.
-		Preload("Product").
+		Preload("Product.Images", func(tx *gorm.DB) *gorm.DB { return tx.Order("position ASC") }).
 		Order(`"createdAt" DESC`).
 		Offset(page.Offset()).
 		Limit(page.Limit).

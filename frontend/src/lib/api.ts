@@ -550,7 +550,5 @@ function toProductPayload(product: ProductDraft) {
     is_featured: product.isFeatured,
     banner: product.banner,
     price: Number(product.price).toFixed(2),
-    rating: Number(product.rating ?? 0).toFixed(2),
-    num_reviews: Number(product.numReviews ?? 0),
   };
 }

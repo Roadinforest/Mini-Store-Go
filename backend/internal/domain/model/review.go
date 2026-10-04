@@ -4,12 +4,12 @@ import "time"
 
 type Review struct {
 	ID                 string    `gorm:"column:id;primaryKey;type:uuid"`
-	UserID             string    `gorm:"column:userId;type:uuid;index;not null"`
-	ProductID          string    `gorm:"column:productId;type:text;index;not null"`
+	UserID             string    `gorm:"column:userId;type:uuid;index;uniqueIndex:review_user_product_idx;not null"`
+	ProductID          string    `gorm:"column:productId;type:text;index;uniqueIndex:review_user_product_idx;not null"`
 	Rating             int       `gorm:"column:rating;not null"`
 	Title              string    `gorm:"column:title;type:text;not null"`
 	Description        string    `gorm:"column:description;type:text;not null"`
-	IsVerifiedPurchase bool      `gorm:"column:isVerifiedPurchase;not null;default:true"`
+	IsVerifiedPurchase bool      `gorm:"column:isVerifiedPurchase;not null;default:false"`
 	CreatedAt          time.Time `gorm:"column:createdAt;autoCreateTime"`
 
 	Product Product `gorm:"foreignKey:ProductID;references:ID"`

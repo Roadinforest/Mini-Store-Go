@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -56,11 +55,15 @@ func (s *Service) Create(ctx context.Context, userID string, sessionCartID strin
 	var order *model.Order
 	reserved := false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var lockedUser model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&lockedUser, "id = ?", userID).Error; err != nil {
+			return err
+		}
 		cart, err := s.loadCheckoutCart(tx, userID, sessionCartID)
 		if err != nil {
 			return err
 		}
-		if len(cart.Items.Data) == 0 {
+		if len(cart.Items) == 0 {
 			return apperror.New(apperror.CodeBadRequest, "cart is empty")
 		}
 		if !user.Address.Valid || !isCompleteAddress(user.Address.Data) {
@@ -69,23 +72,22 @@ func (s *Service) Create(ctx context.Context, userID string, sessionCartID strin
 		if user.PaymentMethod == nil || *user.PaymentMethod == "" {
 			return apperror.New(apperror.CodeBadRequest, "payment method is required")
 		}
+		amounts := cart.Amounts()
 		order = &model.Order{
 			ID: uuid.NewString(), UserID: user.ID, ShippingAddress: user.Address,
-			PaymentMethod: *user.PaymentMethod, ItemsPrice: cart.ItemsPrice,
-			ShippingPrice: cart.ShippingPrice, TaxPrice: cart.TaxPrice,
-			TotalPrice: cart.TotalPrice, CreatedAt: time.Now().UTC(),
+			PaymentMethod: *user.PaymentMethod,
+			ShippingPrice: amounts.ShippingPrice, TaxPrice: amounts.TaxPrice,
+			CreatedAt: time.Now().UTC(),
 		}
-		order.OrderItems = toOrderItems(order.ID, cart.Items.Data)
-		reserved, err = s.reserveStock(ctx, order.ID, cart.Items.Data)
+		order.OrderItems = toOrderItems(order.ID, cart.Items)
+		reserved, err = s.reserveStock(ctx, order.ID, cart.Items)
 		if err != nil {
 			return err
 		}
 		if err := tx.Create(order).Error; err != nil {
 			return err
 		}
-		cart.Items = valueobject.NewJSONArray([]valueobject.CartItem{})
-		cart.ItemsPrice, cart.ShippingPrice, cart.TaxPrice, cart.TotalPrice = decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
-		return tx.Save(cart).Error
+		return tx.Where(`"cartId" = ?`, cart.ID).Delete(&model.CartItem{}).Error
 	})
 	if err != nil {
 		if reserved {
@@ -141,7 +143,7 @@ func (s *Service) MarkPaid(ctx context.Context, orderID string) (*model.Order, e
 			}
 			return err
 		}
-		if order.IsPaid {
+		if order.IsPaid() {
 			return nil
 		}
 		if err := tx.Where(`"orderId" = ?`, orderID).Order(`"productId"`).Find(&order.OrderItems).Error; err != nil {
@@ -161,9 +163,8 @@ func (s *Service) MarkPaid(ctx context.Context, orderID string) (*model.Order, e
 		}
 
 		now := time.Now().UTC()
-		order.IsPaid = true
 		order.PaidAt = &now
-		return tx.Model(&order).Updates(map[string]interface{}{"isPaid": true, "paidAt": now}).Error
+		return tx.Model(&order).Updates(map[string]interface{}{"paidAt": now}).Error
 	})
 	if err != nil {
 		var appErr *apperror.Error
@@ -180,21 +181,27 @@ func (s *Service) MarkPaid(ctx context.Context, orderID string) (*model.Order, e
 }
 
 func (s *Service) MarkDelivered(ctx context.Context, orderID string) (*model.Order, error) {
-	order, err := s.GetByID(ctx, orderID)
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order model.Order
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ?", orderID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperror.New(apperror.CodeNotFound, "order not found")
+			}
+			return err
+		}
+		if !order.IsPaid() {
+			return apperror.New(apperror.CodeBadRequest, "order is not paid")
+		}
+		if order.IsDelivered() {
+			return nil
+		}
+		return tx.Model(&order).Update("deliveredAt", time.Now().UTC()).Error
+	})
 	if err != nil {
-		return nil, err
-	}
-	if !order.IsPaid {
-		return nil, apperror.New(apperror.CodeBadRequest, "order is not paid")
-	}
-	if order.IsDelivered {
-		return order, nil
-	}
-
-	now := time.Now().UTC()
-	order.IsDelivered = true
-	order.DeliveredAt = &now
-	if err := s.orders.Update(ctx, order); err != nil {
+		var appErr *apperror.Error
+		if errors.As(err, &appErr) {
+			return nil, appErr
+		}
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to mark order delivered", err)
 	}
 	return s.GetByID(ctx, orderID)
@@ -213,22 +220,26 @@ func (s *Service) loadCheckoutCart(tx *gorm.DB, userID, sessionCartID string) (*
 	if err != nil {
 		return nil, err
 	}
-	cart.UserID = &userID
-	if cart.SessionCartID == "" {
-		cart.SessionCartID = sessionCartID
+	if cart.UserID == nil {
+		cart.UserID = &userID
+		if err := tx.Model(&cart).Update("userId", userID).Error; err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Where(`"cartId" = ?`, cart.ID).Order(`"createdAt" ASC`).Order(`"productId" ASC`).Find(&cart.Items).Error; err != nil {
+		return nil, err
 	}
 	return &cart, nil
 }
 
-func toOrderItems(orderID string, items []valueobject.CartItem) []model.OrderItem {
+func toOrderItems(orderID string, items []model.CartItem) []model.OrderItem {
 	orderItems := make([]model.OrderItem, 0, len(items))
 	for _, item := range items {
-		price, _ := decimal.NewFromString(item.Price)
 		orderItems = append(orderItems, model.OrderItem{
 			OrderID:   orderID,
 			ProductID: item.ProductID,
 			Qty:       item.Qty,
-			Price:     price,
+			Price:     item.Price,
 			Name:      item.Name,
 			Slug:      item.Slug,
 			Image:     item.Image,
@@ -238,7 +249,7 @@ func toOrderItems(orderID string, items []valueobject.CartItem) []model.OrderIte
 	return orderItems
 }
 
-func (s *Service) reserveStock(ctx context.Context, orderID string, items []valueobject.CartItem) (bool, error) {
+func (s *Service) reserveStock(ctx context.Context, orderID string, items []model.CartItem) (bool, error) {
 	if s.stockStore == nil || !s.stockStore.Enabled() {
 		return false, nil
 	}
@@ -322,7 +333,7 @@ func (s *Service) releaseExpiredReservations(ctx context.Context) error {
 			}
 			continue
 		}
-		if order.IsPaid {
+		if order.IsPaid() {
 			_ = s.stockStore.Confirm(ctx, orderID)
 			continue
 		}
@@ -331,7 +342,7 @@ func (s *Service) releaseExpiredReservations(ctx context.Context) error {
 	return nil
 }
 
-func toStockItems(items []valueobject.CartItem) []rediscache.StockItem {
+func toStockItems(items []model.CartItem) []rediscache.StockItem {
 	merged := make(map[string]int, len(items))
 	for _, item := range items {
 		if item.Qty <= 0 {

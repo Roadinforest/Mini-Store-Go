@@ -16,12 +16,3 @@ type PaymentResult struct {
 	EmailAddress string `json:"email_address"`
 	PricePaid    string `json:"price_paid"`
 }
-
-type CartItem struct {
-	ProductID string `json:"product_id" validate:"required"`
-	Name      string `json:"name" validate:"required"`
-	Slug      string `json:"slug" validate:"required"`
-	Qty       int    `json:"qty" validate:"required,min=1"`
-	Image     string `json:"image" validate:"required"`
-	Price     string `json:"price" validate:"required"`
-}
