@@ -108,6 +108,11 @@ func (s *Service) toolInfos() []*einoschema.ToolInfo {
 }
 
 func (s *Service) executeToolCalls(ctx context.Context, msg *einoschema.Message) ([]toolExecution, error) {
+	for _, call := range msg.ToolCalls {
+		if strings.TrimSpace(call.Function.Arguments) != "" && !validToolArguments(call.Function.Arguments) {
+			return nil, fmt.Errorf("invalid arguments for tool %q", call.Function.Name)
+		}
+	}
 	calls := parseMessageToolCalls(msg)
 	if len(calls) == 0 {
 		return nil, nil
@@ -120,9 +125,12 @@ func (s *Service) executeToolCalls(ctx context.Context, msg *einoschema.Message)
 
 	executions := make([]toolExecution, 0, len(calls))
 	for _, call := range calls {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		definition, ok := definitions[call.Name]
 		if !ok {
-			continue
+			return nil, fmt.Errorf("unknown tool %q", call.Name)
 		}
 		result, err := definition.run(ctx, call.Params)
 		if err != nil {
@@ -472,4 +480,9 @@ func boolArg(args map[string]any, key string, fallback bool) bool {
 
 func formatDecimal(value decimal.Decimal) string {
 	return value.StringFixedBank(2)
+}
+
+func validToolArguments(value string) bool {
+	var arguments map[string]any
+	return json.Unmarshal([]byte(value), &arguments) == nil && arguments != nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	einoschema "github.com/cloudwego/eino/schema"
 
@@ -27,6 +28,7 @@ type Service struct {
 	products repository.ProductRepository
 	reviews  repository.ReviewRepository
 	search   *searchsvc.Service
+	bindErr  error
 }
 
 func NewService(cfg config.AIConfig, model ChatModel, products repository.ProductRepository, reviews repository.ReviewRepository, search *searchsvc.Service) *Service {
@@ -38,16 +40,34 @@ func NewService(cfg config.AIConfig, model ChatModel, products repository.Produc
 		search:   search,
 	}
 	if service.model != nil {
-		_ = service.model.BindTools(service.toolInfos())
+		service.bindErr = service.model.BindTools(service.toolInfos())
 	}
 	return service
 }
 
 func (s *Service) Chat(ctx context.Context, input dto.ChatInput) (*dto.ChatOutput, error) {
+	return s.run(ctx, input, nil)
+}
+
+// Stream continues the same conversation after each streamed tool call.
+func (s *Service) Stream(ctx context.Context, input dto.ChatInput, emit func(dto.StreamChunk) error) (*dto.ChatOutput, error) {
+	if emit == nil {
+		return nil, fmt.Errorf("missing stream emitter")
+	}
+	return s.run(ctx, input, emit)
+}
+
+func (s *Service) run(ctx context.Context, input dto.ChatInput, emit func(dto.StreamChunk) error) (*dto.ChatOutput, error) {
 	if err := s.ensureAvailable(); err != nil {
 		return nil, err
 	}
 
+	budget := s.cfg.Timeout
+	if budget <= 0 {
+		budget = 60 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
 	messages, err := s.buildMessages(ctx, input)
 	if err != nil {
 		return nil, err
@@ -56,9 +76,15 @@ func (s *Service) Chat(ctx context.Context, input dto.ChatInput) (*dto.ChatOutpu
 	rawParts := []string{}
 	toolCalls := []dto.ToolCallOutput{}
 	for turn := 0; turn < 8; turn++ {
-		msg, err := s.model.Generate(ctx, messages)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		msg, err := s.generateTurn(ctx, messages, emit)
 		if err != nil {
 			return nil, apperror.Wrap(apperror.CodeInternal, "failed to generate chat response", err)
+		}
+		if msg == nil {
+			return nil, fmt.Errorf("model returned an empty message")
 		}
 		rawParts = append(rawParts, msg.Content)
 
@@ -75,6 +101,13 @@ func (s *Service) Chat(ctx context.Context, input dto.ChatInput) (*dto.ChatOutpu
 			}, nil
 		}
 		toolCalls = append(toolCalls, toToolCallOutputs(executions)...)
+		if emit != nil {
+			for _, execution := range executions {
+				if err := emit(dto.StreamChunk{Type: "tool_result", ToolName: execution.Call.Name, Content: "商品信息查询完成。"}); err != nil {
+					return nil, err
+				}
+			}
+		}
 
 		if navigation := firstNavigation(executions); navigation != nil {
 			return &dto.ChatOutput{
@@ -93,27 +126,12 @@ func (s *Service) Chat(ctx context.Context, input dto.ChatInput) (*dto.ChatOutpu
 	return nil, apperror.New(apperror.CodeInternal, "ai agent exceeded maximum tool turns")
 }
 
-func (s *Service) Stream(ctx context.Context, input dto.ChatInput) (*einoschema.StreamReader[*einoschema.Message], error) {
-	if err := s.ensureAvailable(); err != nil {
-		return nil, err
-	}
-
-	messages, err := s.buildMessages(ctx, input)
-	if err != nil {
-		return nil, err
-	}
-
-	stream, err := s.model.Stream(ctx, messages)
-	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to stream chat response", err)
-	}
-
-	return stream, nil
-}
-
 func (s *Service) ensureAvailable() error {
 	if !s.cfg.Enabled || s.model == nil {
 		return apperror.New(apperror.CodeServiceDisabled, "ai service is disabled")
+	}
+	if s.bindErr != nil {
+		return apperror.Wrap(apperror.CodeInternal, "failed to bind ai tools", s.bindErr)
 	}
 	return nil
 }

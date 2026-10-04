@@ -2,6 +2,8 @@ import { LoaderCircle, MessageCircle, SendHorizontal, X } from "lucide-react";
 import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { createChatStream, sendChat, type ChatMessage, type ChatStreamChunk } from "@/lib/api";
 
+import { consumeChatStream } from "@/lib/chat-stream";
+
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
     role: "assistant",
@@ -15,6 +17,8 @@ export function ChatWidget() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [error, setError] = useState<string | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { requestRef.current?.abort(); }, []);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -35,7 +39,7 @@ export function ChatWidget() {
       content,
     };
 
-    const nextMessages = [...messages, userMessage];
+    const nextMessages = [...messages.filter(message => !["thinking", "tool_call"].includes(message.messageType ?? "")), userMessage];
     setMessages([
       ...nextMessages,
       {
@@ -48,22 +52,26 @@ export function ChatWidget() {
     setError(null);
     setIsLoading(true);
 
+    const controller = new AbortController();
+    requestRef.current = controller;
     try {
-      const streamed = await streamChat(nextMessages);
+      const streamed = await streamChat(nextMessages, controller.signal);
       if (!streamed) {
-        await sendFallbackChat(nextMessages);
+        await sendFallbackChat(nextMessages, controller.signal);
       }
     } catch {
+      if (controller.signal.aborted) return;
       const message = "无法连接到后端服务，请检查 API 地址、CORS 配置或后端是否正在运行。";
       setError(message);
       setMessages((current) => replaceLastAssistant(current, { content: "智能助手暂时不可用，请稍后再试。", messageType: "normal" }));
     } finally {
-      setIsLoading(false);
+      if (!controller.signal.aborted) setIsLoading(false);
+      if (requestRef.current === controller) requestRef.current = null;
     }
   }
 
-  async function sendFallbackChat(nextMessages: ChatMessage[]) {
-    const fallback = await sendChat(nextMessages);
+  async function sendFallbackChat(nextMessages: ChatMessage[], signal: AbortSignal) {
+    const fallback = await sendChat(nextMessages, signal);
     if (!fallback.success || !fallback.data) {
       const message = friendlyChatError(fallback.message);
       setError(message);
@@ -76,17 +84,6 @@ export function ChatWidget() {
       return;
     }
 
-    const toolHint = latestToolHint(fallback.data);
-    if (toolHint) {
-      setMessages((current) =>
-        replaceLastAssistant(current, {
-          content: toolHint,
-          messageType: "tool_call",
-          toolName: fallback.data?.toolCalls?.at(-1)?.toolName,
-        }),
-      );
-      await sleep(450);
-    }
     const visibleFallback = {
       ...fallback.data,
       content: visibleAssistantContent(fallback.data.content),
@@ -95,19 +92,17 @@ export function ChatWidget() {
     setMessages((current) => replaceLastAssistant(current, visibleFallback));
   }
 
-  async function streamChat(nextMessages: ChatMessage[]) {
-    const response = await createChatStream(nextMessages);
-    if (!response.ok || !response.body) {
+  async function streamChat(nextMessages: ChatMessage[], signal: AbortSignal) {
+    const response = await createChatStream(nextMessages, signal);
+    if (response.status === 404 || response.status === 405) {
+      await response.body?.cancel();
       return false;
     }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
     let assistantContent = "";
 
     async function handleChunk(chunk: ChatStreamChunk) {
       if (chunk.type === "thinking") {
+        assistantContent = "";
         setMessages((current) =>
           replaceLastAssistant(current, {
             content: chunk.content ?? "正在思考...",
@@ -117,7 +112,7 @@ export function ChatWidget() {
         return;
       }
 
-      if (chunk.type === "tool_call") {
+      if (chunk.type === "tool_call" || chunk.type === "tool_result") {
         assistantContent = "";
         setMessages((current) =>
           replaceLastAssistant(current, {
@@ -167,36 +162,7 @@ export function ChatWidget() {
       }
     }
 
-    async function drainEvents() {
-      const events = buffer.split("\n\n");
-      buffer = events.pop() ?? "";
-
-      for (const event of events) {
-        const dataLines = event
-          .split("\n")
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trimStart());
-        if (dataLines.length === 0) continue;
-
-        const data = dataLines.join("\n").trim();
-        if (!data || data === "[DONE]") {
-          continue;
-        }
-
-        await handleChunk(JSON.parse(data) as ChatStreamChunk);
-      }
-    }
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      await drainEvents();
-    }
-
-    buffer += decoder.decode();
-    await drainEvents();
+    await consumeChatStream(response, handleChunk, signal);
     return true;
   }
 
@@ -302,13 +268,7 @@ function visibleAssistantContent(content: string) {
   return content.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, "").trim();
 }
 
-function latestToolHint(message: ChatMessage) {
-  return message.toolCalls?.at(-1)?.content;
-}
 
-function sleep(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
 
 function friendlyChatError(message?: string) {
   if (!message || message === "Failed to fetch" || message === "NetworkError when attempting to fetch resource.") {
