@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"mini-store-go/backend/internal/config"
@@ -25,6 +28,7 @@ type Service struct {
 	db       *gorm.DB
 	products repository.ProductRepository
 	client   *http.Client
+	log      *zap.Logger
 }
 
 type Result struct {
@@ -32,9 +36,14 @@ type Result struct {
 	Score   float64
 }
 
-func NewService(cfg config.SearchConfig, db *gorm.DB, products repository.ProductRepository) *Service {
+func NewService(cfg config.SearchConfig, db *gorm.DB, products repository.ProductRepository, logs ...*zap.Logger) *Service {
+	log := zap.NewNop()
+	if len(logs) > 0 && logs[0] != nil {
+		log = logs[0]
+	}
 	return &Service{
 		cfg:      cfg,
+		log:      log,
 		db:       db,
 		products: products,
 		client: &http.Client{
@@ -52,10 +61,52 @@ func (s *Service) SearchProducts(ctx context.Context, query string, limit int) (
 		limit = 10
 	}
 
-	vectorMatches, _ := s.vectorSearch(ctx, query, 20)
-	textMatches, _ := s.textSearch(ctx, query, 20)
+	// Retrieval is independent; each stage has its own bounded budget so a slow
+	// remote service cannot consume the database fallback's entire budget.
+	type retrieval struct {
+		stage    string
+		matches  []searchMatch
+		err      error
+		duration time.Duration
+	}
+	results := make(chan retrieval, 2)
+	budget := s.cfg.Timeout
+	if budget <= 0 {
+		budget = 5 * time.Second
+	}
+	for stage, run := range map[string]func(context.Context, string, int) ([]searchMatch, error){"vector": s.vectorSearch, "text": s.textSearch} {
+		go func(stage string, run func(context.Context, string, int) ([]searchMatch, error)) {
+			started := time.Now()
+			stageCtx, cancel := context.WithTimeout(ctx, budget)
+			defer cancel()
+			matches, err := run(stageCtx, query, 20)
+			results <- retrieval{stage, matches, err, time.Since(started)}
+		}(stage, run)
+	}
+	var vectorMatches, textMatches []searchMatch
+	for i := 0; i < 2; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case result := <-results:
+			if result.err != nil {
+				s.degraded(result.stage, result.err, result.duration)
+			}
+			if result.stage == "vector" {
+				vectorMatches = result.matches
+			} else {
+				textMatches = result.matches
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(vectorMatches) == 0 && len(textMatches) == 0 {
-		return s.repositoryFallback(ctx, query, limit)
+		started := time.Now()
+		results, err := s.repositoryFallback(ctx, query, limit)
+		s.log.Info("search fallback", zap.String("stage", "repository"), zap.Duration("duration", time.Since(started)), zap.Int("result_count", len(results)), zap.Bool("success", err == nil))
+		return results, err
 	}
 
 	scores := map[string]float64{}
@@ -83,7 +134,16 @@ func (s *Service) SearchProducts(ctx context.Context, query string, limit int) (
 		return nil, nil
 	}
 
-	reranked, err := s.rerank(ctx, query, aligned)
+	started := time.Now()
+	rerankCtx, cancel := context.WithTimeout(ctx, budget)
+	reranked, err := s.rerank(rerankCtx, query, aligned)
+	cancel()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		s.degraded("rerank", err, time.Since(started))
+	}
 	if err == nil && len(reranked) > 0 {
 		aligned = reranked
 	}
@@ -94,6 +154,17 @@ func (s *Service) SearchProducts(ctx context.Context, query string, limit int) (
 		aligned = aligned[:limit]
 	}
 	return aligned, nil
+}
+
+func (s *Service) degraded(stage string, err error, duration time.Duration) {
+	reason := "upstream_failure"
+	if errors.Is(err, context.DeadlineExceeded) {
+		reason = "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		reason = "canceled"
+	}
+	s.log.Warn("search degraded", zap.String("stage", stage), zap.String("reason", reason), zap.Duration("duration", duration))
 }
 
 type searchMatch struct {
@@ -292,8 +363,8 @@ func (s *Service) postJSON(ctx context.Context, url string, headers map[string]s
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("post %s failed: status=%d body=%s", url, resp.StatusCode, string(data))
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("upstream status=%d", resp.StatusCode)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }

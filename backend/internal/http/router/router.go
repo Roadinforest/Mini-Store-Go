@@ -87,7 +87,7 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 	}
 	aiHandler := handler.NewAIHandler(
 		validator,
-		ai.NewService(cfg.AI, aiModel, store.Products, store.Reviews, searchsvc.NewService(cfg.Search, db, store.Products)),
+		ai.NewService(cfg.AI, aiModel, store.Products, store.Reviews, searchsvc.NewService(cfg.Search, db, store.Products, log)),
 		log,
 	)
 
