@@ -8,17 +8,21 @@ import (
 	"mini-store-go/backend/internal/domain/valueobject"
 )
 
+// Legacy adjustments preserve unexplained differences in historical invoices;
+// new orders leave them zero. They are not a claim that an extra fee was charged.
 type Order struct {
-	ID              string                                        `gorm:"column:id;primaryKey;type:uuid"`
-	UserID          string                                        `gorm:"column:userId;type:uuid;index;not null"`
-	ShippingAddress valueobject.JSON[valueobject.ShippingAddress] `gorm:"column:shippingAddress;type:jsonb;not null"`
-	PaymentMethod   string                                        `gorm:"column:paymentMethod;type:text;not null"`
-	PaymentResult   valueobject.JSON[valueobject.PaymentResult]   `gorm:"column:paymentResult;type:jsonb"`
-	ShippingPrice   decimal.Decimal                               `gorm:"column:shippingPrice;type:numeric(12,2);not null"`
-	TaxPrice        decimal.Decimal                               `gorm:"column:taxPrice;type:numeric(12,2);not null"`
-	PaidAt          *time.Time                                    `gorm:"column:paidAt"`
-	DeliveredAt     *time.Time                                    `gorm:"column:deliveredAt"`
-	CreatedAt       time.Time                                     `gorm:"column:createdAt;autoCreateTime"`
+	ID                    string                                        `gorm:"column:id;primaryKey;type:uuid"`
+	UserID                string                                        `gorm:"column:userId;type:uuid;index;not null"`
+	ShippingAddress       valueobject.JSON[valueobject.ShippingAddress] `gorm:"column:shippingAddress;type:jsonb;not null"`
+	PaymentMethod         string                                        `gorm:"column:paymentMethod;type:text;not null"`
+	PaymentResult         valueobject.JSON[valueobject.PaymentResult]   `gorm:"column:paymentResult;type:jsonb"`
+	ShippingPrice         decimal.Decimal                               `gorm:"column:shippingPrice;type:numeric(12,2);not null"`
+	TaxPrice              decimal.Decimal                               `gorm:"column:taxPrice;type:numeric(12,2);not null"`
+	LegacyItemsAdjustment decimal.Decimal                               `gorm:"column:legacyItemsAdjustment;type:numeric(12,2);not null;default:0"`
+	LegacyTotalAdjustment decimal.Decimal                               `gorm:"column:legacyTotalAdjustment;type:numeric(12,2);not null;default:0"`
+	PaidAt                *time.Time                                    `gorm:"column:paidAt"`
+	DeliveredAt           *time.Time                                    `gorm:"column:deliveredAt"`
+	CreatedAt             time.Time                                     `gorm:"column:createdAt;autoCreateTime"`
 
 	User       User        `gorm:"foreignKey:UserID;references:ID"`
 	OrderItems []OrderItem `gorm:"foreignKey:OrderID;references:ID"`
@@ -53,5 +57,7 @@ func (o Order) Amounts() valueobject.Amounts {
 	for _, item := range o.OrderItems {
 		subtotal = subtotal.Add(item.Price.Mul(decimal.NewFromInt(int64(item.Qty))))
 	}
-	return valueobject.NewAmounts(subtotal, o.ShippingPrice, o.TaxPrice)
+	amounts := valueobject.NewAmounts(subtotal.Add(o.LegacyItemsAdjustment), o.ShippingPrice, o.TaxPrice)
+	amounts.TotalPrice = amounts.TotalPrice.Add(o.LegacyTotalAdjustment)
+	return amounts
 }

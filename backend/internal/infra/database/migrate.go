@@ -3,7 +3,10 @@ package database
 import (
 	_ "embed"
 	"fmt"
+	"strings"
+
 	"gorm.io/gorm"
+
 	"mini-store-go/backend/internal/domain/model"
 )
 
@@ -21,7 +24,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 		if tx.Migrator().HasColumn("Cart", "items") {
-			if err := tx.Exec(normalizeCommerceSQL).Error; err != nil {
+			if err := tx.Exec(migrationBody(normalizeCommerceSQL)).Error; err != nil {
 				return fmt.Errorf("normalize commerce schema: %w", err)
 			}
 		}
@@ -31,4 +34,10 @@ func AutoMigrate(db *gorm.DB) error {
 		return fmt.Errorf("auto migrate: %w", err)
 	}
 	return nil
+}
+
+// The SQL files own their transaction when executed directly. AutoMigrate already
+// owns a transaction, so it executes only their body and never commits it early.
+func migrationBody(script string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(script), "BEGIN;"), "COMMIT;")
 }

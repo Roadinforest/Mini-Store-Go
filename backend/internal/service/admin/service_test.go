@@ -24,7 +24,7 @@ func TestSalesUsePaidOrderSnapshotsWithoutDuplicatingShipping(t *testing.T) {
 		}
 	}
 	now := time.Now().UTC()
-	paid := model.Order{ID: uuid.NewString(), UserID: user.ID, ShippingAddress: valueobject.NewJSON(valueobject.ShippingAddress{}), PaymentMethod: "cash", PaidAt: &now, ShippingPrice: decimal.NewFromInt(7), TaxPrice: decimal.NewFromInt(1), OrderItems: []model.OrderItem{{ProductID: product.ID, Qty: 2, Price: decimal.NewFromInt(10)}, {ProductID: other.ID, Qty: 1, Price: decimal.NewFromInt(5)}}}
+	paid := model.Order{ID: uuid.NewString(), UserID: user.ID, ShippingAddress: valueobject.NewJSON(valueobject.ShippingAddress{}), PaymentMethod: "cash", PaidAt: &now, LegacyItemsAdjustment: decimal.RequireFromString("17.94"), LegacyTotalAdjustment: decimal.NewFromInt(-1), ShippingPrice: decimal.NewFromInt(7), TaxPrice: decimal.NewFromInt(1), OrderItems: []model.OrderItem{{ProductID: product.ID, Qty: 2, Price: decimal.NewFromInt(10)}, {ProductID: other.ID, Qty: 1, Price: decimal.NewFromInt(5)}}}
 	unpaid := model.Order{ID: uuid.NewString(), UserID: user.ID, ShippingAddress: paid.ShippingAddress, PaymentMethod: "cash", ShippingPrice: decimal.NewFromInt(100), OrderItems: []model.OrderItem{{ProductID: product.ID, Qty: 1, Price: decimal.NewFromInt(100)}}}
 	for _, row := range []any{&paid, &unpaid} {
 		if err := db.Create(row).Error; err != nil {
@@ -36,7 +36,7 @@ func TestSalesUsePaidOrderSnapshotsWithoutDuplicatingShipping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if overview.OrderCount != 2 || !overview.TotalSales.Equal(decimal.NewFromInt(33)) {
+	if overview.OrderCount != 2 || !overview.TotalSales.Equal(decimal.RequireFromString("49.94")) {
 		t.Fatalf("overview=%+v", overview)
 	}
 }

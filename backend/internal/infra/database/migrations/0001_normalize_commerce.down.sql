@@ -1,4 +1,6 @@
--- Run with psql --single-transaction -v ON_ERROR_STOP=1 after stopping writers.
+BEGIN;
+
+-- Run the complete script with psql -v ON_ERROR_STOP=1 after stopping writers.
 LOCK TABLE "Product", "ProductImage", "Cart", "CartItem", "Order", "OrderItem", "Review" IN ACCESS EXCLUSIVE MODE;
 
 ALTER TABLE "Product" ADD COLUMN images text[] NOT NULL DEFAULT '{}';
@@ -22,13 +24,36 @@ ALTER TABLE "Order" ADD COLUMN "itemsPrice" numeric(12,2) NOT NULL DEFAULT 0,
     ADD COLUMN "totalPrice" numeric(12,2) NOT NULL DEFAULT 0,
     ADD COLUMN "isPaid" boolean NOT NULL DEFAULT false,
     ADD COLUMN "isDelivered" boolean NOT NULL DEFAULT false;
-UPDATE "Order" o SET "itemsPrice" = COALESCE((SELECT SUM(i.price * i.qty) FROM "OrderItem" i WHERE i."orderId" = o.id), 0),
+UPDATE "Order" o SET "itemsPrice" = COALESCE((SELECT SUM(i.price * i.qty) FROM "OrderItem" i WHERE i."orderId" = o.id), 0) + o."legacyItemsAdjustment",
     "isPaid" = ("paidAt" IS NOT NULL), "isDelivered" = ("deliveredAt" IS NOT NULL);
-UPDATE "Order" SET "totalPrice" = "itemsPrice" + "shippingPrice" + "taxPrice";
+UPDATE "Order" SET "totalPrice" = "itemsPrice" + "shippingPrice" + "taxPrice" + "legacyTotalAdjustment";
+ALTER TABLE "Order" DROP COLUMN "legacyItemsAdjustment", DROP COLUMN "legacyTotalAdjustment";
 
+-- Restore archived duplicate reviews only when the retained record is unchanged.
+-- If it was edited after migration, keep the archive for explicit reconciliation.
+DROP INDEX review_user_product_idx;
+CREATE TEMP TABLE restorable_review_archives ON COMMIT DROP AS
+SELECT DISTINCT ON (a."reviewId") a."reviewId", a."retainedReviewId", a."rowData"
+FROM "ReviewDuplicateArchive" a
+JOIN "ReviewDuplicateArchive" retained ON retained."reviewId" = a."retainedReviewId" AND retained."archivedAt" = a."archivedAt"
+JOIN "Review" live ON live.id = a."retainedReviewId"
+    AND (to_jsonb(live) - 'createdAt') = (retained."rowData" - 'createdAt')
+    AND live."createdAt" IS NOT DISTINCT FROM (retained."rowData"->>'createdAt')::timestamptz
+WHERE a."reviewId" <> a."retainedReviewId"
+ORDER BY a."reviewId", a."archivedAt" DESC;
+INSERT INTO "Review"
+SELECT (jsonb_populate_record(NULL::"Review", a."rowData")).* FROM restorable_review_archives a
+ON CONFLICT (id) DO NOTHING;
+UPDATE "Product" p SET rating = COALESCE((SELECT ROUND(AVG(r.rating), 2) FROM "Review" r WHERE r."productId" = p.id), 0),
+    "numReviews" = (SELECT COUNT(*) FROM "Review" r WHERE r."productId" = p.id)
+WHERE p.id IN (SELECT "rowData"->>'productId' FROM restorable_review_archives);
+
+-- Archive tables remain after rollback so removed unavailable items and original
+-- byte/camelCase encodings are recoverable; never resurrect checked-out carts.
 DROP TABLE "CartItem";
 DROP TABLE "ProductImage";
 DROP INDEX cart_session_idx;
 DROP INDEX cart_user_idx;
-DROP INDEX review_user_product_idx;
 ALTER TABLE "Review" ALTER COLUMN "isVerifiedPurchase" SET DEFAULT true;
+
+COMMIT;
