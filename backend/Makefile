@@ -21,4 +21,5 @@ fmt:
 .PHONY: test-integration
 test-integration:
 	@test -n "$(TEST_DATABASE_DSN)" || (echo 'Set TEST_DATABASE_DSN to a dedicated PostgreSQL test database'; exit 1)
+	@test -n "$(TEST_REDIS_ADDR)" || (echo 'Set TEST_REDIS_ADDR to a dedicated Redis test instance'; exit 1)
 	go test -race -count=1 ./...
