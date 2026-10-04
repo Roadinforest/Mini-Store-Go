@@ -2,6 +2,8 @@
 
 梳理日期：2026-10-04。
 
+本文保留 3 + 5 实施前的旧链路记录。当前行为见 [本阶段实施说明](order-expiration-inventory-sync.md)。
+
 本文记录当前订单 Service 与 Redis StockStore 的旧链路，作为 [Redis 库存预占与 Saga 一致性技术方案](redis-inventory-saga-design.md) 的阅读基线。Saga 文档中的持久化预占、Outbox、恢复 worker 和 epoch 重建属于待实现设计，不能据此解释旧链路的行为。
 
 核心流程：**下单时扣 Redis 可售量，标记付款时扣 PostgreSQL 实际库存；建单失败或预占到期时尝试恢复 Redis 数量。** Redis 是可选依赖，运行期部分错误会跳过预占继续建单。

@@ -4,6 +4,8 @@
 
 状态：待实现技术设计；本文不表示相关功能已落地。
 
+范围决定（2026-10-04）：用户要求本阶段只实现订单到期关闭、补货同步与 Redis 重建，其余边界 case 暂不考虑。实际实现和延后事项见 [本阶段实施说明](order-expiration-inventory-sync.md)。本文完整 Saga / Outbox / epoch 设计保留为未来参考。
+
 分支：`codex/redis-inventory-saga-design`
 
 实际代码基线：`43bc84b`，仍使用 Redis 库存层。`35f4ff1` 不在当前分支历史中，不作为实施前提。

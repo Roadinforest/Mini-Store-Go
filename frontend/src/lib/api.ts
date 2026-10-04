@@ -46,6 +46,7 @@ const apiCartSchema = pricesSchema.extend({session_cart_id: z.string(), items: z
 const apiOrderSchema = pricesSchema.extend({
   id: z.string(), user_id: z.string(), shipping_address: addressSchema, payment_method: z.string(),
   is_paid: z.boolean(), paid_at: z.string().nullish(), is_delivered: z.boolean(), delivered_at: z.string().nullish(),
+  status: z.enum(["UNPAID", "PAID", "EXPIRED"]).optional(), expires_at: z.string().nullish(), expired_at: z.string().nullish(),
   created_at: z.string(), order_items: z.array(apiCartItemSchema),
   user: z.object({id: z.string(), name: z.string(), email: z.string()}).optional(),
 });
@@ -507,6 +508,9 @@ function toOrder(order: ApiOrder): Order {
     taxPrice: order.tax_price,
     totalPrice: order.total_price,
     isPaid: order.is_paid,
+    status: order.status ?? (order.is_paid ? "PAID" : "UNPAID"),
+    expiresAt: order.expires_at ?? null,
+    expiredAt: order.expired_at ?? null,
     paidAt: order.paid_at ?? null,
     isDelivered: order.is_delivered,
     deliveredAt: order.delivered_at ?? null,

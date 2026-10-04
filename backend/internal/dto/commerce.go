@@ -50,6 +50,9 @@ type OrderResponse struct {
 	IsDelivered     bool                        `json:"is_delivered"`
 	DeliveredAt     *time.Time                  `json:"delivered_at,omitempty"`
 	CreatedAt       time.Time                   `json:"created_at"`
+	Status          string                      `json:"status"`
+	ExpiresAt       time.Time                   `json:"expires_at"`
+	ExpiredAt       *time.Time                  `json:"expired_at,omitempty"`
 	OrderItems      []OrderItemResponse         `json:"order_items"`
 	User            *struct {
 		ID    string `json:"id"`

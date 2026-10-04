@@ -74,6 +74,9 @@ func toOrderResponse(order *model.Order) dto.OrderResponse {
 		IsDelivered:     order.IsDelivered(),
 		DeliveredAt:     order.DeliveredAt,
 		CreatedAt:       order.CreatedAt,
+		Status:          order.Status(time.Now().UTC()),
+		ExpiresAt:       order.Deadline(),
+		ExpiredAt:       order.ExpiredAt,
 		OrderItems:      items,
 	}
 

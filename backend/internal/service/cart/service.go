@@ -8,6 +8,7 @@ import (
 	"mini-store-go/backend/internal/domain/model"
 	"mini-store-go/backend/internal/infra/rediscache"
 	"mini-store-go/backend/internal/repository"
+	inventoryservice "mini-store-go/backend/internal/service/inventory"
 	"time"
 )
 
@@ -15,10 +16,15 @@ type Service struct {
 	carts      repository.CartRepository
 	products   repository.ProductRepository
 	stockStore *rediscache.StockStore
+	inventory  *inventoryservice.Service
 }
 
-func NewService(carts repository.CartRepository, products repository.ProductRepository, stockStore *rediscache.StockStore) *Service {
-	return &Service{carts: carts, products: products, stockStore: stockStore}
+func NewService(carts repository.CartRepository, products repository.ProductRepository, stockStore *rediscache.StockStore, inventory ...*inventoryservice.Service) *Service {
+	s := &Service{carts: carts, products: products, stockStore: stockStore}
+	if len(inventory) > 0 {
+		s.inventory = inventory[0]
+	}
+	return s
 }
 
 func (s *Service) GetCurrentCart(ctx context.Context, sessionCartID string, userID *string) (*model.Cart, error) {
@@ -57,8 +63,12 @@ func (s *Service) availableStock(ctx context.Context, product *model.Product) in
 		return product.Stock
 	}
 
-	_ = s.stockStore.PrimeStocks(ctx, map[string]int{product.ID: product.Stock})
 	stock, ok, err := s.stockStore.Available(ctx, product.ID)
+	if !ok && err == nil && s.inventory != nil {
+		if syncErr := s.inventory.Sync(ctx); syncErr == nil {
+			stock, ok, err = s.stockStore.Available(ctx, product.ID)
+		}
+	}
 	if err != nil || !ok {
 		return product.Stock
 	}

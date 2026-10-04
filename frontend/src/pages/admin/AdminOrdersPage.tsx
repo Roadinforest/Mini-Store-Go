@@ -4,11 +4,14 @@ import { Button } from "@/components/common/Button";
 import * as api from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { useOrderClock } from "@/hooks/useOrderClock";
+import { isOrderExpired, orderStatusLabel } from "@/lib/order-status";
 
 export function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const now = useOrderClock();
 
   useEffect(() => {
     let cancelled = false;
@@ -72,11 +75,11 @@ export function AdminOrdersPage() {
                   <td className="p-4">{formatDate(order.createdAt)}</td>
                   <td className="p-4">{formatCurrency(order.totalPrice)}</td>
                   <td className="p-4">
-                    {order.isPaid ? "Paid" : "Pending"} / {order.isDelivered ? "Delivered" : "Shipping"}
+                    {orderStatusLabel(order, now)}{order.isPaid ? ` / ${order.isDelivered ? "Delivered" : "Shipping"}` : ""}
                   </td>
                   <td className="p-4">
                     <div className="flex gap-2">
-                      <Button variant="outline" onClick={() => void onMarkPaid(order.id)} disabled={order.isPaid}>
+                      <Button variant="outline" onClick={() => void onMarkPaid(order.id)} disabled={order.isPaid || isOrderExpired(order, now)}>
                         Mark paid
                       </Button>
                       <Button variant="outline" onClick={() => void onMarkDelivered(order.id)} disabled={!order.isPaid || order.isDelivered}>

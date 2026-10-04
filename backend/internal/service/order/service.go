@@ -14,14 +14,13 @@ import (
 	"mini-store-go/backend/internal/domain/model"
 	"mini-store-go/backend/internal/domain/valueobject"
 	"mini-store-go/backend/internal/dto"
+	"mini-store-go/backend/internal/infra/inventorylock"
 	"mini-store-go/backend/internal/infra/rediscache"
 	"mini-store-go/backend/internal/repository"
+	inventoryservice "mini-store-go/backend/internal/service/inventory"
 )
 
-const (
-	reservationTTL          = 15 * time.Minute
-	reservationCleanupLimit = 100
-)
+const reservationTTL = model.OrderReservationTTL
 
 type Service struct {
 	db         *gorm.DB
@@ -30,6 +29,7 @@ type Service struct {
 	users      repository.UserRepository
 	products   repository.ProductRepository
 	stockStore *rediscache.StockStore
+	inventory  *inventoryservice.Service
 }
 
 func NewService(db *gorm.DB, orders repository.OrderRepository, carts repository.CartRepository, users repository.UserRepository, products repository.ProductRepository, stockStore *rediscache.StockStore) *Service {
@@ -40,6 +40,7 @@ func NewService(db *gorm.DB, orders repository.OrderRepository, carts repository
 		users:      users,
 		products:   products,
 		stockStore: stockStore,
+		inventory:  inventoryservice.NewService(db, stockStore),
 	}
 }
 
@@ -53,8 +54,10 @@ func (s *Service) Create(ctx context.Context, userID string, sessionCartID strin
 	}
 
 	var order *model.Order
-	reserved := false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := inventorylock.Acquire(tx); err != nil {
+			return err
+		}
 		var lockedUser model.User
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&lockedUser, "id = ?", userID).Error; err != nil {
 			return err
@@ -72,15 +75,21 @@ func (s *Service) Create(ctx context.Context, userID string, sessionCartID strin
 		if user.PaymentMethod == nil || *user.PaymentMethod == "" {
 			return apperror.New(apperror.CodeBadRequest, "payment method is required")
 		}
+		var createdAt time.Time
+		if err := tx.Raw("SELECT clock_timestamp()").Scan(&createdAt).Error; err != nil {
+			return err
+		}
 		amounts := cart.Amounts()
 		order = &model.Order{
 			ID: uuid.NewString(), UserID: user.ID, ShippingAddress: user.Address,
 			PaymentMethod: *user.PaymentMethod,
 			ShippingPrice: amounts.ShippingPrice, TaxPrice: amounts.TaxPrice,
-			CreatedAt: time.Now().UTC(),
+			CreatedAt: createdAt,
 		}
+		expiresAt := order.CreatedAt.Add(reservationTTL)
+		order.ExpiresAt = &expiresAt
 		order.OrderItems = toOrderItems(order.ID, cart.Items)
-		reserved, err = s.reserveStock(ctx, order.ID, cart.Items)
+		err = s.reserveStock(ctx, tx, order.ID, cart.Items)
 		if err != nil {
 			return err
 		}
@@ -90,11 +99,7 @@ func (s *Service) Create(ctx context.Context, userID string, sessionCartID strin
 		return tx.Where(`"cartId" = ?`, cart.ID).Delete(&model.CartItem{}).Error
 	})
 	if err != nil {
-		if reserved {
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			_ = s.stockStore.Release(cleanupCtx, order.ID)
-		}
+		s.syncStock(ctx)
 		var appErr *apperror.Error
 		if errors.As(err, &appErr) {
 			return nil, appErr
@@ -102,6 +107,7 @@ func (s *Service) Create(ctx context.Context, userID string, sessionCartID strin
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to create order", err)
 	}
 
+	s.syncStock(ctx)
 	return s.GetByID(ctx, order.ID)
 }
 
@@ -135,7 +141,11 @@ func (s *Service) List(ctx context.Context, page dto.PageParams) ([]model.Order,
 }
 
 func (s *Service) MarkPaid(ctx context.Context, orderID string) (*model.Order, error) {
+	expired := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := inventorylock.Acquire(tx); err != nil {
+			return err
+		}
 		var order model.Order
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ?", orderID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -144,6 +154,17 @@ func (s *Service) MarkPaid(ctx context.Context, orderID string) (*model.Order, e
 			return err
 		}
 		if order.IsPaid() {
+			return nil
+		}
+		var now time.Time
+		if err := tx.Raw("SELECT clock_timestamp()").Scan(&now).Error; err != nil {
+			return err
+		}
+		if order.Status(now) == "EXPIRED" {
+			expired = true
+			if order.ExpiredAt == nil {
+				return tx.Model(&order).Update("expiredAt", now).Error
+			}
 			return nil
 		}
 		if err := tx.Where(`"orderId" = ?`, orderID).Order(`"productId"`).Find(&order.OrderItems).Error; err != nil {
@@ -162,20 +183,21 @@ func (s *Service) MarkPaid(ctx context.Context, orderID string) (*model.Order, e
 			}
 		}
 
-		now := time.Now().UTC()
 		order.PaidAt = &now
 		return tx.Model(&order).Updates(map[string]interface{}{"paidAt": now}).Error
 	})
 	if err != nil {
 		var appErr *apperror.Error
 		if errors.As(err, &appErr) {
-			_ = s.releaseStockReservation(ctx, orderID)
 			return nil, appErr
 		}
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to mark order paid", err)
 	}
 
-	_ = s.confirmStockReservation(ctx, orderID)
+	s.syncStock(ctx)
+	if expired {
+		return nil, apperror.New(apperror.CodeConflict, "order has expired; please place a new order")
+	}
 
 	return s.GetByID(ctx, orderID)
 }
@@ -249,97 +271,30 @@ func toOrderItems(orderID string, items []model.CartItem) []model.OrderItem {
 	return orderItems
 }
 
-func (s *Service) reserveStock(ctx context.Context, orderID string, items []model.CartItem) (bool, error) {
+func (s *Service) reserveStock(ctx context.Context, tx *gorm.DB, orderID string, items []model.CartItem) error {
 	if s.stockStore == nil || !s.stockStore.Enabled() {
-		return false, nil
+		return nil
 	}
-
 	stockItems := toStockItems(items)
 	if len(stockItems) == 0 {
-		return false, nil
+		return nil
 	}
-
-	_ = s.releaseExpiredReservations(ctx)
-
-	if err := s.primeStockCache(ctx, stockItems); err != nil {
-		return false, nil
+	// Rebuild from persisted open orders, never from physical stock alone.
+	if err := s.inventory.SyncTx(ctx, tx); err != nil {
+		return nil
 	}
-
 	err := s.stockStore.Reserve(ctx, orderID, stockItems, reservationTTL)
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, rediscache.ErrStockCacheMiss) {
-		if primeErr := s.primeStockCache(ctx, stockItems); primeErr != nil {
-			return false, nil
-		}
-		if retryErr := s.stockStore.Reserve(ctx, orderID, stockItems, reservationTTL); retryErr == nil {
-			return true, nil
-		} else {
-			err = retryErr
-		}
-	}
 	if errors.Is(err, rediscache.ErrInsufficient) {
-		return false, apperror.New(apperror.CodeOutOfStock, "not enough stock")
+		return apperror.New(apperror.CodeOutOfStock, "not enough stock")
 	}
-
-	return false, nil
-}
-
-func (s *Service) primeStockCache(ctx context.Context, items []rediscache.StockItem) error {
-	stocks := make(map[string]int, len(items))
-	for _, item := range items {
-		if _, exists := stocks[item.ProductID]; exists {
-			continue
-		}
-		product, err := s.products.GetByID(ctx, item.ProductID)
-		if err != nil {
-			return err
-		}
-		stocks[item.ProductID] = product.Stock
-	}
-	return s.stockStore.PrimeStocks(ctx, stocks)
-}
-
-func (s *Service) releaseStockReservation(ctx context.Context, orderID string) error {
-	if s.stockStore == nil || !s.stockStore.Enabled() {
-		return nil
-	}
-	return s.stockStore.Release(ctx, orderID)
-}
-
-func (s *Service) confirmStockReservation(ctx context.Context, orderID string) error {
-	if s.stockStore == nil || !s.stockStore.Enabled() {
-		return nil
-	}
-	return s.stockStore.Confirm(ctx, orderID)
-}
-
-func (s *Service) releaseExpiredReservations(ctx context.Context) error {
-	if s.stockStore == nil || !s.stockStore.Enabled() {
-		return nil
-	}
-
-	orderIDs, err := s.stockStore.ExpiredReservations(ctx, time.Now().UTC(), reservationCleanupLimit)
-	if err != nil {
-		return err
-	}
-
-	for _, orderID := range orderIDs {
-		order, err := s.orders.GetByID(ctx, orderID)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				_ = s.stockStore.Release(ctx, orderID)
-			}
-			continue
-		}
-		if order.IsPaid() {
-			_ = s.stockStore.Confirm(ctx, orderID)
-			continue
-		}
-		_ = s.stockStore.Release(ctx, orderID)
-	}
+	// The existing Redis-unavailable checkout policy is retained for this scope.
 	return nil
+}
+
+func (s *Service) syncStock(ctx context.Context) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = s.inventory.Sync(cleanupCtx) // Maintenance retries the current snapshot.
 }
 
 func toStockItems(items []model.CartItem) []rediscache.StockItem {

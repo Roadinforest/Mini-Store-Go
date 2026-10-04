@@ -3,10 +3,13 @@ import { Link } from "react-router-dom";
 import * as api from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { useOrderClock } from "@/hooks/useOrderClock";
+import { orderStatusLabel } from "@/lib/order-status";
 
 export function UserOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const now = useOrderClock();
 
   useEffect(() => {
     let cancelled = false;
@@ -34,7 +37,7 @@ export function UserOrdersPage() {
               <th className="p-4">Order</th>
               <th className="p-4">Created</th>
               <th className="p-4">Total</th>
-              <th className="p-4">Paid</th>
+              <th className="p-4">Status</th>
             </tr>
           </thead>
           <tbody>
@@ -52,7 +55,7 @@ export function UserOrdersPage() {
                   </td>
                   <td className="p-4">{formatDate(order.createdAt)}</td>
                   <td className="p-4">{formatCurrency(order.totalPrice)}</td>
-                  <td className="p-4">{order.isPaid ? "Yes" : "No"}</td>
+                  <td className="p-4">{orderStatusLabel(order, now)}</td>
                 </tr>
               ))
             )}

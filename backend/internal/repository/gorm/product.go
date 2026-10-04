@@ -10,6 +10,7 @@ import (
 
 	"mini-store-go/backend/internal/domain/model"
 	"mini-store-go/backend/internal/dto"
+	"mini-store-go/backend/internal/infra/inventorylock"
 	"mini-store-go/backend/internal/repository"
 )
 
@@ -103,11 +104,19 @@ func (r *productRepository) ListCategories(ctx context.Context) ([]repository.Ca
 }
 
 func (r *productRepository) Create(ctx context.Context, product *model.Product) error {
-	return r.db.WithContext(ctx).Create(product).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := inventorylock.Acquire(tx); err != nil {
+			return err
+		}
+		return tx.Create(product).Error
+	})
 }
 
 func (r *productRepository) Update(ctx context.Context, product *model.Product) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := inventorylock.Acquire(tx); err != nil {
+			return err
+		}
 		var current model.Product
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", product.ID).Error; err != nil {
 			return err
@@ -132,7 +141,12 @@ func (r *productRepository) Update(ctx context.Context, product *model.Product) 
 }
 
 func (r *productRepository) Delete(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Delete(&model.Product{}, "id = ?", id).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := inventorylock.Acquire(tx); err != nil {
+			return err
+		}
+		return tx.Delete(&model.Product{}, "id = ?", id).Error
+	})
 }
 
 func applyProductFilter(query *gorm.DB, filter dto.ProductListFilter) *gorm.DB {

@@ -2,6 +2,7 @@ package rediscache
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -24,8 +25,33 @@ var (
 )
 
 type StockItem struct {
-	ProductID string
-	Qty       int
+	ProductID string `json:"product_id"`
+	Qty       int    `json:"qty"`
+}
+
+type Reservation struct {
+	OrderID   string      `json:"order_id"`
+	ExpiresAt int64       `json:"expires_at"`
+	Items     []StockItem `json:"items"`
+}
+
+// Rebuild replaces the projection, including reservation details. Callers must
+// hold the shared database inventory lock so an in-flight Reserve is not lost.
+func (s *StockStore) Rebuild(ctx context.Context, stocks map[string]int, reservations []Reservation) error {
+	if !s.Enabled() {
+		return nil
+	}
+	if reservations == nil {
+		reservations = []Reservation{}
+	}
+	payload, err := json.Marshal(struct {
+		Stocks       map[string]int `json:"stocks"`
+		Reservations []Reservation  `json:"reservations"`
+	}{stocks, reservations})
+	if err != nil {
+		return err
+	}
+	return rebuildScript.Run(ctx, s.client, []string{"stock:products", reservationExpirationsKey}, string(payload)).Err()
 }
 
 type StockStore struct {
@@ -205,6 +231,31 @@ end
 
 redis.call("ZADD", "reservation:order:expirations", expires_at, order_id)
 return {1, ""}
+`)
+
+var rebuildScript = redis.NewScript(`
+local snapshot = cjson.decode(ARGV[1])
+for _, product_id in ipairs(redis.call("SMEMBERS", KEYS[1])) do
+  redis.call("DEL", "stock:product:" .. product_id)
+end
+for _, order_id in ipairs(redis.call("ZRANGE", KEYS[2], 0, -1)) do
+  redis.call("DEL", "reservation:order:" .. order_id)
+end
+redis.call("DEL", KEYS[1], KEYS[2])
+for product_id, stock in pairs(snapshot.stocks) do
+  redis.call("SET", "stock:product:" .. product_id, stock)
+  redis.call("SADD", KEYS[1], product_id)
+end
+for _, reservation in ipairs(snapshot.reservations) do
+  local key = "reservation:order:" .. reservation.order_id
+  -- Also replace hashes whose expiration index was lost independently.
+  redis.call("DEL", key)
+  for _, item in ipairs(reservation.items) do
+    redis.call("HSET", key, item.product_id, item.qty)
+  end
+  redis.call("ZADD", KEYS[2], reservation.expires_at, reservation.order_id)
+end
+return 1
 `)
 
 var releaseScript = redis.NewScript(`

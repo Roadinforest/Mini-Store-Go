@@ -5,6 +5,8 @@ import { Button } from "@/components/common/Button";
 import * as api from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { useOrderClock } from "@/hooks/useOrderClock";
+import { isOrderExpired, orderStatusLabel } from "@/lib/order-status";
 
 export function OrderDetailsPage() {
   const { id } = useParams();
@@ -12,6 +14,7 @@ export function OrderDetailsPage() {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const now = useOrderClock();
 
   useEffect(() => {
     if (!id) return;
@@ -37,14 +40,13 @@ export function OrderDetailsPage() {
 
   const currentOrder = order;
   const isAdmin = currentUser?.role === "admin";
+  const expired = isOrderExpired(currentOrder, now);
 
   async function onMarkPaid() {
     const result = await markOrderPaid(currentOrder.id);
     setMessage(result.message);
-    if (result.success) {
-      const refreshed = await api.getOrderByID(currentOrder.id);
-      if (refreshed.success && refreshed.data) setOrder(refreshed.data);
-    }
+    const refreshed = await api.getOrderByID(currentOrder.id);
+    if (refreshed.success && refreshed.data) setOrder(refreshed.data);
   }
 
   async function onMarkDelivered() {
@@ -63,6 +65,12 @@ export function OrderDetailsPage() {
           <h1 className="h2-bold mb-4">Order Details</h1>
           <div className="text-sm text-muted-foreground">Order ID: {currentOrder.id}</div>
           <div className="mt-3 text-sm text-muted-foreground">Created at {formatDate(currentOrder.createdAt)}</div>
+          <div className="mt-3 text-sm">Status: {orderStatusLabel(currentOrder, now)}</div>
+          {expired ? (
+            <p className="mt-3 text-sm text-muted-foreground">The payment window has closed. Please place a new order.</p>
+          ) : !currentOrder.isPaid && currentOrder.expiresAt ? (
+            <p className="mt-3 text-sm text-muted-foreground">Pay before {formatDate(currentOrder.expiresAt)}</p>
+          ) : null}
         </section>
         <section className="rounded-3xl border p-5">
           <h2 className="mb-3 text-lg font-semibold">Items</h2>
@@ -114,7 +122,7 @@ export function OrderDetailsPage() {
 
         {isAdmin && (
           <div className="mt-5 grid gap-3">
-            <Button onClick={() => void onMarkPaid()} disabled={currentOrder.isPaid}>
+            <Button onClick={() => void onMarkPaid()} disabled={currentOrder.isPaid || expired}>
               Mark paid
             </Button>
             <Button variant="outline" onClick={() => void onMarkDelivered()} disabled={!currentOrder.isPaid || currentOrder.isDelivered}>

@@ -28,7 +28,10 @@ func AutoMigrate(db *gorm.DB) error {
 				return fmt.Errorf("normalize commerce schema: %w", err)
 			}
 		}
-		return tx.AutoMigrate(model.All()...)
+		if err := tx.AutoMigrate(model.All()...); err != nil {
+			return err
+		}
+		return tx.Exec(`UPDATE "Order" SET "expiresAt" = "createdAt" + INTERVAL '15 minutes' WHERE "expiresAt" IS NULL`).Error
 	})
 	if err != nil {
 		return fmt.Errorf("auto migrate: %w", err)

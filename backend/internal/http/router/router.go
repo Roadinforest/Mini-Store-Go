@@ -21,6 +21,7 @@ import (
 	adminservice "mini-store-go/backend/internal/service/admin"
 	authservice "mini-store-go/backend/internal/service/auth"
 	cartservice "mini-store-go/backend/internal/service/cart"
+	inventoryservice "mini-store-go/backend/internal/service/inventory"
 	orderservice "mini-store-go/backend/internal/service/order"
 	productservice "mini-store-go/backend/internal/service/product"
 	reviewservice "mini-store-go/backend/internal/service/review"
@@ -49,6 +50,7 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 
 	store := gormrepo.NewStore(db)
 	stockStore := rediscache.NewStockStore(redisClient)
+	inventory := inventoryservice.NewService(db, stockStore)
 	validator := validation.New()
 	tokenManager := auth.NewManager(cfg.Auth)
 	passwordHasher := auth.NewPasswordHasher(cfg.Auth.PasswordSecret)
@@ -63,7 +65,7 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 	)
 	productHandler := handler.NewProductHandler(
 		validator,
-		productservice.NewService(store.Products),
+		productservice.NewService(store.Products, inventory),
 	)
 	reviewHandler := handler.NewReviewHandler(
 		validator,
@@ -71,7 +73,7 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 	)
 	cartHandler := handler.NewCartHandler(
 		validator,
-		cartservice.NewService(store.Carts, store.Products, stockStore),
+		cartservice.NewService(store.Carts, store.Products, stockStore, inventory),
 	)
 	orderHandler := handler.NewOrderHandler(
 		validator,

@@ -92,6 +92,9 @@ export type Order = {
   taxPrice: number;
   totalPrice: number;
   isPaid: boolean;
+  status: "UNPAID" | "PAID" | "EXPIRED";
+  expiresAt: string | null;
+  expiredAt: string | null;
   paidAt: string | null;
   isDelivered: boolean;
   deliveredAt: string | null;

@@ -59,7 +59,7 @@ flowchart TD
 | 聊天模型 | 可选 | AI 关闭或缺少 API Key / Model 时模型为空；普通电商 API 可用，聊天返回服务禁用错误 |
 | Pinecone / Qwen | 可选 | 向量召回、重排可降级到其他检索路径，不阻止普通业务启动 |
 
-当前没有独立的任务进程、消息队列或定时库存清理进程；AI 对话也没有落入聊天会话表。
+当前没有独立的任务进程或消息队列；应用进程内每 5 秒扫描到期订单并同步 Redis 库存。AI 对话没有落入聊天会话表。
 
 ## 2. 目录、职责与依赖装配
 
@@ -368,25 +368,17 @@ sequenceDiagram
 
 创建订单不扣 PostgreSQL 的 Product.Stock。付款时对每个商品执行 `WHERE id = ? AND stock >= ?` 的条件更新，用 `stock - qty` 扣减；任一商品不足则整个数据库事务回滚。`MarkDelivered` 要求订单已付款。
 
-顺序重复调用 `MarkPaid` 时，已经付款的订单直接返回；但 `IsPaid` 在事务外读取，没有订单行锁或条件状态更新，不能据此认为并发付款请求已实现严格幂等。
+MarkPaid 在订单行锁下检查付款状态，重复付款只扣一次库存；到期检查使用数据库时间，过期订单保留并拒绝付款。
 
 ### 7.4 Redis 库存协议与一致性边界
 
-来源：[StockStore](../internal/infra/rediscache/stock.go)、[Order Service](../internal/service/order/service.go)。
+来源：[StockStore](../internal/infra/rediscache/stock.go)、[Order Service](../internal/service/order/service.go)、[Inventory Service](../internal/service/inventory/service.go)。
 
-| Key | 类型与用途 |
-| --- | --- |
-| `stock:product:<productID>` | String，可预占库存；用数据库库存执行 SETNX 初始化 |
-| `reservation:order:<orderID>` | Hash，保存该订单各商品的预占数量 |
-| `reservation:order:expirations` | Sorted Set，订单 ID 对应过期时间戳 |
+订单新增 expiresAt / expiredAt。后台启动时及每 5 秒关闭到期未付款订单，先提交数据库，再同步 Redis。新订单付款窗口为 15 分钟；已过期订单及明细保留，付款接口返回 409。
 
-Reserve 用 Lua 先检查全部商品，再批量扣可用库存、保存 Hash 并写入过期索引；Release 用 Lua 将数量加回并删除预占信息；Confirm 删除预占信息但不增加 Redis 库存，因为付款已使数据库实际库存减少。
+Redis 可售量按数据库实物库存减去尚未付款、尚未关闭订单占用量重建，同时重建预占 Hash 和到期索引。建单、付款、商品修改和后台任务触发同步，库存键缺失时购物车尝试恢复。所有库存写入和重建共用数据库 advisory lock，防止重建覆盖在途预占；每次使用最新快照，没有异步增减事件乱序问题。
 
-预占期为 15 分钟，但没有设置 Redis 自动过期 TTL。后续下单进入 `reserveStock` 时，最多查询并处理 100 条过期记录：已付款订单确认，未付款或不存在的订单释放。因此没有新下单流量时，过期预占可能继续保留，订单本身也不会自动取消。
-
-这是 Redis 与 PostgreSQL 之间的尽力协调机制：库存不足会阻止下单，部分 Redis 连接或补库存错误则放弃预占并继续；订单写入失败会尝试释放，但补偿错误被忽略。数据库与 Redis 没有跨系统原子事务。
-
-另外，SETNX 不覆盖旧库存；管理员修改商品库存没有同步 StockStore，Redis 丢数据后也没有从未付款订单重建预占的流程。最终付款的数据库条件更新可防止单次扣减令库存变负，但缓存漂移、付款并发和补偿失败仍需独立处理。
+本阶段只实现订单过期、补货同步与库存重建，保留 Redis 运行期故障时跳过预占继续建单的策略。完整 Saga、Outbox、请求级幂等和独立数据库预占表暂不实现。全量扫描与全局库存锁适用于本项目的小规模部署。范围决定、迁移与验证见 [实施说明](../../docs/order-expiration-inventory-sync.md)。
 
 ### 7.5 评价和管理统计
 

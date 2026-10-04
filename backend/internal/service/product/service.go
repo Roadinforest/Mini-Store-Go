@@ -14,14 +14,20 @@ import (
 	"mini-store-go/backend/internal/domain/model"
 	"mini-store-go/backend/internal/dto"
 	"mini-store-go/backend/internal/repository"
+	inventoryservice "mini-store-go/backend/internal/service/inventory"
 )
 
 type Service struct {
-	products repository.ProductRepository
+	products  repository.ProductRepository
+	inventory *inventoryservice.Service
 }
 
-func NewService(products repository.ProductRepository) *Service {
-	return &Service{products: products}
+func NewService(products repository.ProductRepository, inventory ...*inventoryservice.Service) *Service {
+	s := &Service{products: products}
+	if len(inventory) > 0 {
+		s.inventory = inventory[0]
+	}
+	return s
 }
 
 func (s *Service) GetByID(ctx context.Context, productID string) (*model.Product, error) {
@@ -98,6 +104,7 @@ func (s *Service) Create(ctx context.Context, input dto.UpsertProductInput) (*mo
 	if err := s.products.Create(ctx, product); err != nil {
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to create product", err)
 	}
+	s.syncStock(ctx)
 
 	return product, nil
 }
@@ -117,6 +124,7 @@ func (s *Service) Update(ctx context.Context, productID string, input dto.Upsert
 	if err := s.products.Update(ctx, product); err != nil {
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to update product", err)
 	}
+	s.syncStock(ctx)
 
 	return product, nil
 }
@@ -129,8 +137,18 @@ func (s *Service) Delete(ctx context.Context, productID string) error {
 	if err := s.products.Delete(ctx, productID); err != nil {
 		return apperror.Wrap(apperror.CodeInternal, "failed to delete product", err)
 	}
+	s.syncStock(ctx)
 
 	return nil
+}
+
+func (s *Service) syncStock(ctx context.Context) {
+	if s.inventory == nil {
+		return
+	}
+	syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = s.inventory.Sync(syncCtx) // Periodic maintenance repairs a failed refresh.
 }
 
 func buildProductModel(productID string, input dto.UpsertProductInput) (*model.Product, error) {

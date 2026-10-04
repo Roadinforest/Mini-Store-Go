@@ -356,6 +356,7 @@ paths:
     get:
       tags: [Orders]
       summary: Order details
+      description: Orders are retained after expiration. Responses include status (UNPAID, PAID, EXPIRED), expires_at, and optional expired_at. New orders have a 15-minute payment window.
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -367,6 +368,32 @@ paths:
       responses:
         '200':
           description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /api/v1/admin/orders/{id}/pay:
+    put:
+      tags: [Admin]
+      summary: Mark an order paid
+      description: Checks the payment deadline using database time under the order lock. An expired unpaid order is closed and retained; it cannot be paid. Repeated payment of an already-paid order returns its existing result.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paid order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '409':
+          description: Order has expired; place a new order
           content:
             application/json:
               schema:

@@ -23,6 +23,8 @@ type Order struct {
 	PaidAt                *time.Time                                    `gorm:"column:paidAt"`
 	DeliveredAt           *time.Time                                    `gorm:"column:deliveredAt"`
 	CreatedAt             time.Time                                     `gorm:"column:createdAt;autoCreateTime"`
+	ExpiresAt             *time.Time                                    `gorm:"column:expiresAt;index"`
+	ExpiredAt             *time.Time                                    `gorm:"column:expiredAt"`
 
 	User       User        `gorm:"foreignKey:UserID;references:ID"`
 	OrderItems []OrderItem `gorm:"foreignKey:OrderID;references:ID"`
@@ -51,6 +53,25 @@ func (OrderItem) TableName() string {
 
 func (o Order) IsPaid() bool      { return o.PaidAt != nil }
 func (o Order) IsDelivered() bool { return o.DeliveredAt != nil }
+
+const OrderReservationTTL = 15 * time.Minute
+
+func (o Order) Deadline() time.Time {
+	if o.ExpiresAt != nil {
+		return *o.ExpiresAt
+	}
+	return o.CreatedAt.Add(OrderReservationTTL)
+}
+
+func (o Order) Status(now time.Time) string {
+	if o.IsPaid() {
+		return "PAID"
+	}
+	if o.ExpiredAt != nil || !now.Before(o.Deadline()) {
+		return "EXPIRED"
+	}
+	return "UNPAID"
+}
 
 func (o Order) Amounts() valueobject.Amounts {
 	subtotal := decimal.Zero

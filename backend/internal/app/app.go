@@ -18,6 +18,7 @@ import (
 	"mini-store-go/backend/internal/infra/database"
 	"mini-store-go/backend/internal/infra/rediscache"
 	"mini-store-go/backend/internal/logger"
+	inventoryservice "mini-store-go/backend/internal/service/inventory"
 )
 
 func Run(ctx context.Context) error {
@@ -45,6 +46,14 @@ func Run(ctx context.Context) error {
 		return err
 	}
 	defer closeRedis(redisClient, log)
+
+	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
+	maintenanceDone := make(chan struct{})
+	go func() {
+		defer close(maintenanceDone)
+		inventoryservice.NewService(db, rediscache.NewStockStore(redisClient)).Run(maintenanceCtx, log)
+	}()
+	defer func() { stopMaintenance(); <-maintenanceDone }()
 
 	engine, err := router.New(cfg, log, db, redisClient)
 	if err != nil {
