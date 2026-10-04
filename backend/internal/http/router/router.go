@@ -45,6 +45,7 @@ func New(cfg *config.Config, log *zap.Logger, db *gorm.DB, redisClient *redis.Cl
 	healthHandler := handler.NewHealthHandler(db, redisClient)
 
 	engine.GET("/healthz", healthHandler.Healthz)
+	engine.GET("/readyz", healthHandler.Readyz)
 
 	store := gormrepo.NewStore(db)
 	stockStore := rediscache.NewStockStore(redisClient)
