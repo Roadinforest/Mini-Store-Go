@@ -5,8 +5,7 @@ SET LOCAL lock_timeout = '10s';
 SET LOCAL mini_store.legacy_timestamp_timezone = 'Asia/Shanghai';
 
 -- Run after 0001, with application writers stopped.
-LOCK TABLE "Product", "Review", "Order", "User", "Session", "Account",
-           "VerificationToken", "Cart", "CartItem" IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE "Product", "Review", "Order", "User", "Cart", "CartItem" IN ACCESS EXCLUSIVE MODE;
 DO $$
 BEGIN
     IF to_regclass('public."CartItem"') IS NULL
@@ -45,7 +44,6 @@ FROM corrected_product_review_stats c WHERE c."productId" = p.id;
 CREATE INDEX IF NOT EXISTS "idx_Order_user_id" ON "Order" ("userId");
 CREATE INDEX IF NOT EXISTS "idx_Review_user_id" ON "Review" ("userId");
 CREATE INDEX IF NOT EXISTS "idx_Review_product_id" ON "Review" ("productId");
-CREATE INDEX IF NOT EXISTS "idx_Session_user_id" ON "Session" ("userId");
 
 ALTER TABLE "Order"
     ALTER COLUMN "shippingAddress" TYPE jsonb USING "shippingAddress"::jsonb,
@@ -72,9 +70,7 @@ BEGIN
         FROM information_schema.columns c
         JOIN (VALUES
             ('User', 'emailVerified'), ('User', 'createdAt'), ('User', 'updatedAt'),
-            ('Account', 'createdAt'), ('Account', 'updatedAt'),
-            ('Session', 'expires'), ('Session', 'createdAt'), ('Session', 'updatedAt'),
-            ('VerificationToken', 'expires'), ('Product', 'createdAt'),
+            ('Product', 'createdAt'),
             ('Cart', 'createdAt'), ('CartItem', 'createdAt'),
             ('Order', 'paidAt'), ('Order', 'deliveredAt'), ('Order', 'createdAt'),
             ('Review', 'createdAt')

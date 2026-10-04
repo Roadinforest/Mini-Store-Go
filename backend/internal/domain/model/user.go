@@ -19,11 +19,9 @@ type User struct {
 	CreatedAt     time.Time                                     `gorm:"column:createdAt;autoCreateTime"`
 	UpdatedAt     time.Time                                     `gorm:"column:updatedAt;autoUpdateTime"`
 
-	Accounts []Account `gorm:"foreignKey:UserID;references:ID"`
-	Sessions []Session `gorm:"foreignKey:UserID;references:ID"`
-	Carts    []Cart    `gorm:"foreignKey:UserID;references:ID"`
-	Orders   []Order   `gorm:"foreignKey:UserID;references:ID"`
-	Reviews  []Review  `gorm:"foreignKey:UserID;references:ID"`
+	Carts   []Cart   `gorm:"foreignKey:UserID;references:ID"`
+	Orders  []Order  `gorm:"foreignKey:UserID;references:ID"`
+	Reviews []Review `gorm:"foreignKey:UserID;references:ID"`
 }
 
 func (User) TableName() string {

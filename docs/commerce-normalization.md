@@ -100,10 +100,29 @@ psql "$DATABASE_DSN" -v ON_ERROR_STOP=1 \
 0002 在一个事务中完成以下操作：
 
 - 重算所有商品的评价聚合，只更新不一致的商品；无评价的商品归零。原评分和评价数先写入 ProductReviewStatsArchive，便于审计。
-- 补齐 Order.userId、Review.userId/productId、Session.userId 的模型辅助索引。
+- 补齐 Order.userId、Review.userId/productId 的模型辅助索引。
 - Order.shippingAddress/paymentResult 和 User.address 转为 jsonb。
 - 按数据库所有者确认的 Asia/Shanghai 解释旧 timestamp without time zone，显式 AT TIME ZONE 转成 timestamptz，并保留原时间精度。比如旧值 2026-01-01 12:34:56.123 转换后的时间点是 2026-01-01 04:34:56.123 UTC；这是同一业务时间点。已有 timestamptz、归档数据和 Prisma 迁移元数据不转换。
 
 脚本固定操作 public schema，锁等待超过 10 秒会失败并回滚，失败连接先 ROLLBACK 再重试。可以独立重复执行：已一致的统计不新增归档，已存在的索引不重复创建，已转换的时间不再次解释。执行后返回 corrected_products；以先前只读核验快照为基准应为 729，若期间评价变化则以当时数据库为准。
 
 0002 不改订单金额字段或订单明细。当前 AutoMigrate 没有自动调用 0002，需要显式执行此文件。PostgreSQL 测试验证评分归零/重算、原统计归档、索引、JSON 类型、Asia/Shanghai 转换、毫秒精度、NULL、不同会话时区、订单金额保持以及重复执行。
+
+## 0003 移除未使用的旧认证表
+
+当前后端注册、登录、刷新均采用 User + JWT，未使用 Account、Session、VerificationToken。对应模型、User.Accounts/User.Sessions 关联、模型迁移注册已经移除，AutoMigrate 不会重新创建三张表。Cart.sessionCartId 仍用于匿名购物车，继续保留。
+
+执行清理脚本：
+
+```sh
+psql "$DATABASE_DSN" -v ON_ERROR_STOP=1 \
+  -f backend/internal/infra/database/migrations/0003_remove_unused_auth_tables.up.sql
+```
+
+0003 先锁定现有的旧认证表，将完整原始记录写入 LegacyAuthArchive，再删除三张活动表；归档没有关联 User 的外键。脚本不使用 DROP CASCADE，遇到额外依赖会整体回滚。可以重复执行，也支持旧认证表已经不存在的数据库。0002 已调整为只对齐当前业务表，清理后重复执行不会依赖这三张旧表。
+
+2026-10-04 使用本地配置检查实际库时，三张旧认证表均为 0 行。清理前业务表数量：User 4、Product 1500、Cart 8、CartItem 7、Order 10、OrderItem 11、Review 2390。清理脚本不修改这些表的数据。
+
+测试覆盖有数据的旧表完整归档、重复执行、额外依赖失败回滚、新库建表及清理后 AutoMigrate 均不创建旧表，并执行了数据库和认证路由的 race 测试、go vet 与编译检查。
+
+同日已执行 0003 并只读核验：Account、Session、VerificationToken 均不存在，LegacyAuthArchive 为 0 行；上述业务表记录数全部保持一致。
