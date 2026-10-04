@@ -1,6 +1,8 @@
 import {
   createContext,
   useContext,
+  useCallback,
+  useRef,
   useEffect,
   useMemo,
   useReducer,
@@ -12,20 +14,15 @@ import type {
   AppState,
   Order,
   Product,
-  ProductDraft,
   Review,
   ShippingAddress,
   User,
 } from "@/lib/types";
-import { calcCart, getAverageRatingForProduct, slugify } from "@/lib/utils";
-import { createInitialState } from "@/mock/data";
-
-const STORAGE_KEY = "mini-store-go-mock-state";
+import { calcCart } from "@/lib/utils";
 
 type AuthPayload = { email: string; password: string };
 type SignUpPayload = { name: string; email: string; password: string };
 type ProfilePayload = { name: string; email: string };
-type ReviewPayload = { rating: number; title: string; description: string };
 type Result = { success: boolean; message: string };
 
 type StoreContextValue = {
@@ -43,17 +40,11 @@ type StoreContextValue = {
   placeOrder: () => Promise<{ success: boolean; message: string; orderId?: string }>;
   markOrderPaid: (orderId: string) => Promise<{ success: boolean; message: string }>;
   markOrderDelivered: (orderId: string) => Promise<{ success: boolean; message: string }>;
-  saveProduct: (draft: ProductDraft) => void;
-  deleteProduct: (productId: string) => void;
-  updateUser: (userId: string, payload: Pick<User, "name" | "role">) => void;
-  deleteUser: (userId: string) => void;
-  upsertReview: (productId: string, payload: ReviewPayload) => Result;
   syncProducts: (products: Product[]) => void;
   syncReviews: (reviews: Review[]) => void;
 };
 
 type Action =
-  | { type: "SET_STATE"; payload: AppState }
   | { type: "SIGN_IN"; payload: string }
   | { type: "SIGN_OUT" }
   | { type: "SET_CART"; payload: AppState["cart"] }
@@ -64,36 +55,33 @@ type Action =
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
-    case "SET_STATE":
-      return action.payload;
     case "SIGN_IN":
-      return { ...state, currentUserId: action.payload };
+      return { ...state, users: state.users.filter(user => user.id === action.payload), orders: [], cart: calcCart([]), currentUserId: action.payload };
     case "SIGN_OUT":
-      return { ...state, currentUserId: null };
+      return { ...state, users: [], orders: [], cart: calcCart([]), currentUserId: null };
     case "SET_CART":
       return { ...state, cart: action.payload };
     case "SET_USERS":
-      return { ...state, users: action.payload };
+      return { ...state, users: mergeByID(state.users, action.payload) };
     case "SET_PRODUCTS":
-      return { ...state, products: action.payload };
+      return { ...state, products: mergeByID(state.products, action.payload) };
     case "SET_ORDERS":
-      return { ...state, orders: action.payload };
+      return { ...state, orders: mergeByID(state.orders, action.payload) };
     case "SET_REVIEWS":
-      return { ...state, reviews: action.payload };
+      return { ...state, reviews: mergeByID(state.reviews, action.payload) };
     default:
       return state;
   }
 }
 
-function loadInitialState() {
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) return createInitialState();
+function loadInitialState(): AppState {
+  return { products: [], users: [], reviews: [], orders: [], cart: calcCart([]), currentUserId: null };
+}
 
-  try {
-    return JSON.parse(raw) as AppState;
-  } catch {
-    return createInitialState();
-  }
+function mergeByID<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  const merged = new Map(current.map(item => [item.id, item]));
+  incoming.forEach(item => merged.set(item.id, item));
+  return [...merged.values()];
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -102,22 +90,25 @@ export function StoreProvider({ children }: PropsWithChildren) {
   const [state, dispatch] = useReducer(reducer, undefined, loadInitialState);
   const [authReady, setAuthReady] = useState(false);
 
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+  const sessionVersion = useRef(0);
+  const syncProducts = useCallback((products: Product[]) => dispatch({ type: "SET_PRODUCTS", payload: products }), []);
+  const syncReviews = useCallback((reviews: Review[]) => dispatch({ type: "SET_REVIEWS", payload: reviews }), []);
 
   useEffect(() => {
+    // Remove the obsolete cache, which could contain mock passwords and roles.
+    try { localStorage.removeItem("mini-store-go-mock-state"); } catch { /* Storage is optional. */ }
     let cancelled = false;
+    const version = sessionVersion.current;
 
     async function bootstrapAuth() {
       const [authResult, cartResult] = await Promise.all([
         authApi.getCurrentUser(),
         authApi.getCart(),
       ]);
-      if (cancelled) return;
+      if (cancelled || version !== sessionVersion.current) return;
 
       if (authResult.success && authResult.data) {
-        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, authResult.data) });
+        dispatch({ type: "SET_USERS", payload: [authResult.data] });
         dispatch({ type: "SIGN_IN", payload: authResult.data.id });
       } else {
         dispatch({ type: "SIGN_OUT" });
@@ -147,44 +138,65 @@ export function StoreProvider({ children }: PropsWithChildren) {
       currentUser,
       authReady,
       async signIn(payload) {
+        ++sessionVersion.current;
+        const version = sessionVersion.current;
         const result = await authApi.signIn(payload);
+        setAuthReady(true);
+        if (version !== sessionVersion.current) return { success: false, message: "Session changed. Please retry." };
         if (!result.success || !result.data) {
           return { success: false, message: result.message };
         }
 
-        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
+        dispatch({ type: "SET_USERS", payload: [result.data] });
         dispatch({ type: "SIGN_IN", payload: result.data.id });
+        const cart = await authApi.getCart();
+        if (version === sessionVersion.current && cart.success && cart.data) dispatch({ type: "SET_CART", payload: cart.data });
         return { success: true, message: "Signed in." };
       },
       async signUp(payload) {
+        ++sessionVersion.current;
+        const version = sessionVersion.current;
         const result = await authApi.signUp({
           ...payload,
           confirm_password: payload.password,
         });
+        setAuthReady(true);
+        if (version !== sessionVersion.current) return { success: false, message: "Session changed. Please retry." };
         if (!result.success || !result.data) {
           return { success: false, message: result.message };
         }
 
-        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
+        dispatch({ type: "SET_USERS", payload: [result.data] });
         dispatch({ type: "SIGN_IN", payload: result.data.id });
+        const cart = await authApi.getCart();
+        if (version === sessionVersion.current && cart.success && cart.data) dispatch({ type: "SET_CART", payload: cart.data });
         return { success: true, message: "Account created." };
       },
       async signOut() {
-        await authApi.signOut();
+        ++sessionVersion.current;
+        const version = sessionVersion.current;
+        const result = await authApi.signOut();
+        if (version !== sessionVersion.current) return;
+        setAuthReady(true);
+        if (!result.success) throw new Error(result.message);
         dispatch({ type: "SIGN_OUT" });
+        const cart = await authApi.getCart();
+        if (version === sessionVersion.current && cart.success && cart.data) dispatch({ type: "SET_CART", payload: cart.data });
       },
       async addToCart(productId) {
-        const product = state.products.find((item) => item.id === productId);
-        if (!product) return { success: false, message: "Product not found." };
+        const version = sessionVersion.current;
         const result = await authApi.addCartItem(productId);
+        if (version !== sessionVersion.current) return { success: false, message: "Session changed. Please retry." };
         if (!result.success || !result.data) {
           return { success: false, message: result.message };
         }
         dispatch({ type: "SET_CART", payload: result.data });
-        return { success: true, message: `${product.name} added to cart.` };
+        return { success: true, message: "Added to cart." };
       },
       async removeFromCart(productId) {
+        const version = sessionVersion.current;
         const result = await authApi.removeCartItem(productId);
+        if (version !== sessionVersion.current) return { success: false, message: "Session changed. Please retry." };
         if (!result.success || !result.data) {
           return { success: false, message: result.message };
         }
@@ -195,57 +207,69 @@ export function StoreProvider({ children }: PropsWithChildren) {
         if (!currentUser) {
           return { success: false, message: "Sign in required." };
         }
+        const version = sessionVersion.current;
         const result = await authApi.updateAddress(address);
+        if (version !== sessionVersion.current) return { success: false, message: "Session changed. Please retry." };
         if (!result.success || !result.data) {
           return { success: false, message: result.message };
         }
-        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
+        dispatch({ type: "SET_USERS", payload: [result.data] });
         return { success: true, message: "Shipping address saved." };
       },
       async setPaymentMethod(method) {
         if (!currentUser) {
           return { success: false, message: "Sign in required." };
         }
+        const version = sessionVersion.current;
         const result = await authApi.updatePaymentMethod({ type: method });
+        if (version !== sessionVersion.current) return { success: false, message: "Session changed. Please retry." };
         if (!result.success || !result.data) {
           return { success: false, message: result.message };
         }
-        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
+        dispatch({ type: "SET_USERS", payload: [result.data] });
         return { success: true, message: "Payment method saved." };
       },
       async updateProfile(payload) {
         if (!currentUser) {
           return { success: false, message: "Sign in required." };
         }
+        const version = sessionVersion.current;
         const result = await authApi.updateProfile(payload);
+        if (version !== sessionVersion.current) return { success: false, message: "Session changed. Please retry." };
         if (!result.success || !result.data) {
           return { success: false, message: result.message };
         }
-        dispatch({ type: "SET_USERS", payload: upsertUser(state.users, result.data) });
+        dispatch({ type: "SET_USERS", payload: [result.data] });
         return { success: true, message: "Profile updated." };
       },
       async placeOrder() {
+        const version = sessionVersion.current;
         const result = await authApi.createOrder();
+        if (version !== sessionVersion.current) return { success: false, message: "Session changed. Please retry." };
         if (!result.success || !result.data) {
           return { success: false, message: result.message };
         }
-        dispatch({ type: "SET_ORDERS", payload: [result.data, ...state.orders] });
+        dispatch({ type: "SET_ORDERS", payload: [result.data] });
         dispatch({ type: "SET_CART", payload: calcCart([]) });
         return { success: true, message: "Order created.", orderId: result.data.id };
       },
       async markOrderPaid(orderId) {
+        const version = sessionVersion.current;
         const result = await authApi.markOrderPaid(orderId);
+        if (version !== sessionVersion.current) return { success: false, message: "Session changed. Please retry." };
         if (!result.success || !result.data) {
           return { success: false, message: result.message };
         }
         dispatch({
           type: "SET_ORDERS",
-          payload: state.orders.map((item) => (item.id === orderId ? result.data! : item)),
+          payload: [result.data],
         });
         return { success: true, message: "Order marked as paid." };
       },
       async markOrderDelivered(orderId) {
+        const version = sessionVersion.current;
         const result = await authApi.markOrderDelivered(orderId);
+        if (version !== sessionVersion.current) return { success: false, message: "Session changed. Please retry." };
         if (!result.success || !result.data) {
           return { success: false, message: result.message };
         }
@@ -255,119 +279,10 @@ export function StoreProvider({ children }: PropsWithChildren) {
         });
         return { success: true, message: "Order marked as delivered." };
       },
-      saveProduct(draft) {
-        const normalized: Product = {
-          id: draft.id ?? crypto.randomUUID(),
-          name: draft.name,
-          slug: draft.slug || slugify(draft.name),
-          category: draft.category,
-          images: draft.images,
-          brand: draft.brand,
-          description: draft.description,
-          stock: Number(draft.stock),
-          price: Number(draft.price),
-          rating: draft.rating ?? 0,
-          numReviews: draft.numReviews ?? 0,
-          isFeatured: draft.isFeatured,
-          banner: draft.banner,
-          createdAt: draft.createdAt ?? new Date().toISOString(),
-        };
-        const exists = state.products.some((product) => product.id === normalized.id);
-        const nextProducts = exists
-          ? state.products.map((product) =>
-              product.id === normalized.id ? normalized : product,
-            )
-          : [normalized, ...state.products];
-        dispatch({ type: "SET_PRODUCTS", payload: nextProducts });
-      },
-      deleteProduct(productId) {
-        dispatch({
-          type: "SET_PRODUCTS",
-          payload: state.products.filter((product) => product.id !== productId),
-        });
-      },
-      updateUser(userId, payload) {
-        dispatch({
-          type: "SET_USERS",
-          payload: state.users.map((user) =>
-            user.id === userId ? { ...user, ...payload } : user,
-          ),
-        });
-      },
-      deleteUser(userId) {
-        dispatch({
-          type: "SET_USERS",
-          payload: state.users.filter((user) => user.id !== userId),
-        });
-      },
-      upsertReview(productId, payload) {
-        if (!currentUser) {
-          return { success: false, message: "Sign in required." };
-        }
-
-        const existing = state.reviews.find(
-          (review) => review.productId === productId && review.userId === currentUser.id,
-        );
-        const nextReviews = existing
-          ? state.reviews.map((review) =>
-              review.id === existing.id
-                ? { ...review, ...payload }
-                : review,
-            )
-          : [
-              {
-                id: crypto.randomUUID(),
-                userId: currentUser.id,
-                productId,
-                rating: payload.rating,
-                title: payload.title,
-                description: payload.description,
-                isVerifiedPurchase: true,
-                createdAt: new Date().toISOString(),
-              },
-              ...state.reviews,
-            ];
-
-        const nextProducts = state.products.map((product) => {
-          if (product.id !== productId) return product;
-          const summary = getAverageRatingForProduct(productId, nextReviews);
-          return {
-            ...product,
-            rating: summary.rating,
-            numReviews: summary.numReviews,
-          };
-        });
-
-        dispatch({ type: "SET_REVIEWS", payload: nextReviews });
-        dispatch({ type: "SET_PRODUCTS", payload: nextProducts });
-        return { success: true, message: "Review saved." };
-      },
-      syncProducts(products) {
-        const merged = [...state.products];
-        for (const incoming of products) {
-          const index = merged.findIndex((product) => product.id === incoming.id);
-          if (index >= 0) {
-            merged[index] = { ...merged[index], ...incoming };
-          } else {
-            merged.push(incoming);
-          }
-        }
-        dispatch({ type: "SET_PRODUCTS", payload: merged });
-      },
-      syncReviews(reviews) {
-        const merged = [...state.reviews];
-        for (const incoming of reviews) {
-          const index = merged.findIndex((review) => review.id === incoming.id);
-          if (index >= 0) {
-            merged[index] = { ...merged[index], ...incoming };
-          } else {
-            merged.push(incoming);
-          }
-        }
-        dispatch({ type: "SET_REVIEWS", payload: merged });
-      },
+      syncProducts,
+      syncReviews,
     };
-  }, [authReady, currentUser, state]);
+  }, [authReady, currentUser, state, syncProducts, syncReviews]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
@@ -378,12 +293,4 @@ export function useStore() {
     throw new Error("useStore must be used within StoreProvider");
   }
   return context;
-}
-
-function upsertUser(users: User[], nextUser: User) {
-  const exists = users.some((user) => user.id === nextUser.id);
-  if (!exists) {
-    return [...users, nextUser];
-  }
-  return users.map((user) => (user.id === nextUser.id ? { ...user, ...nextUser } : user));
 }

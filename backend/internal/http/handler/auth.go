@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"mini-store-go/backend/internal/auth"
 	"mini-store-go/backend/internal/config"
@@ -90,6 +91,8 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 
 func (h *AuthHandler) SignOut(c *gin.Context) {
 	h.clearAuthCookies(c)
+	// Start a fresh guest cart instead of exposing the authenticated session cart.
+	setCookie(c, h.cfg, h.cfg.SessionCartCookieName, uuid.NewString(), time.Now().Add(365*24*time.Hour))
 	response.OK(c, gin.H{"signed_out": true})
 }
 

@@ -12,6 +12,7 @@ export function HomePage() {
   const { syncProducts } = useStore();
   const [featured, setFeatured] = useState<Product[]>([]);
   const [latest, setLatest] = useState<Product[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -24,6 +25,7 @@ export function HomePage() {
       ]);
       if (cancelled) return;
 
+      setError(!featuredResult.success ? featuredResult.message : !latestResult.success ? latestResult.message : null);
       const nextFeatured = featuredResult.data ?? [];
       const nextLatest = latestResult.data ?? [];
       setFeatured(nextFeatured);
@@ -36,10 +38,11 @@ export function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [syncProducts]);
 
   return (
     <>
+      {error && <p role="alert" className="my-4 text-destructive">{error}</p>}
       {featured.length > 0 && <HeroCarousel products={featured} />}
       {loading ? (
         <section className="my-10 rounded-3xl border p-6 text-sm text-muted-foreground">Loading products...</section>

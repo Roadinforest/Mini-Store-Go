@@ -50,7 +50,7 @@ export function ProductPage() {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [slug, syncProducts, syncReviews]);
 
   if (loading) {
     return <div className="rounded-2xl border p-5 text-sm text-muted-foreground">Loading product...</div>;
@@ -83,7 +83,8 @@ export function ProductPage() {
   async function submitReview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!product) return;
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     const result = await api.upsertReview({
       product_id: product.id,
       rating: Number(formData.get("rating")),
@@ -104,7 +105,7 @@ export function ProductPage() {
         setReviews(reviewsResult.data);
         syncReviews(reviewsResult.data);
       }
-      event.currentTarget.reset();
+      form.reset();
     }
   }
 

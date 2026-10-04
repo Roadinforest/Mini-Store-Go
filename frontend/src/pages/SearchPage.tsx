@@ -77,7 +77,7 @@ export function SearchPage() {
     return () => {
       cancelled = true;
     };
-  }, [category, price, query, rating, sort]);
+  }, [category, price, query, rating, sort, syncProducts]);
 
   return (
     <div className="grid md:grid-cols-5 md:gap-5">
@@ -165,6 +165,7 @@ export function SearchPage() {
           </div>
         </div>
 
+        <p role="status" className="mb-4 text-sm text-muted-foreground">{summary}</p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {loading ? (
             <div className="rounded-2xl border p-4 text-sm text-muted-foreground">Loading products...</div>

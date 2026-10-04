@@ -14,6 +14,7 @@ type CategoryOption = {
 export function Header() {
   const navigate = useNavigate();
   const { currentUser, signOut, state } = useStore();
+  const [authError, setAuthError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [categories, setCategories] = useState<CategoryOption[]>([]);
@@ -89,7 +90,11 @@ export function Header() {
   }
 
   async function onSignOut() {
-    await signOut();
+    try { await signOut(); } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Sign out failed.");
+      return;
+    }
+    setAuthError(null);
     setUserMenuOpen(false);
     setMobileMenuOpen(false);
     navigate("/");
@@ -97,6 +102,7 @@ export function Header() {
 
   return (
     <header className="w-full border-b">
+      {authError && <p role="alert" className="wrapper text-destructive">{authError}</p>}
       <div className="wrapper flex-between">
         <div className="flex-start" ref={sidebarRef}>
           <button
@@ -206,7 +212,7 @@ export function Header() {
               to="/cart"
               className="inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground"
             >
-              <ShoppingCart className="size-4" /> Cart
+              <ShoppingCart className="size-4" /> Cart ({cartCount})
             </Link>
 
             <div className="relative flex items-center gap-2" ref={userMenuRef}>
@@ -272,7 +278,7 @@ export function Header() {
               <div className="absolute right-5 top-20 z-30 flex w-56 flex-col items-start rounded-2xl border bg-popover p-4 text-popover-foreground shadow-xl">
                 <ModeToggle />
                 <Link to="/cart" className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm hover:bg-accent" onClick={() => setMobileMenuOpen(false)}>
-                  <ShoppingCart className="size-4" /> Cart
+                  <ShoppingCart className="size-4" /> Cart ({cartCount})
                 </Link>
                 {!currentUser ? (
                   <Link
